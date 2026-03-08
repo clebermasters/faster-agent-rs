@@ -1,0 +1,17 @@
+target/
+.env
+.env.local
+.env.*
+!.env.example
+*.swap
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/
+*.db
+*.db-*
+*.log
+coverage/
+skills/bedrock-models/data
+skill-agent.db

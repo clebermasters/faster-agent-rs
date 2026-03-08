@@ -1,0 +1,45 @@
+[workspace]
+members = [
+    "crates/skill-core",
+    "crates/skill-registry", 
+    "crates/skill-embeddings",
+    "crates/skill-discovery",
+    "crates/skill-executor",
+    "crates/skill-tools",
+    "crates/skill-llm",
+    "crates/skill-agent",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Cleber Rodrigues"]
+repository = ""
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", features = ["json"] }
+async-trait = "0.1"
+anyhow = "1"
+
+# Skill parsing
+agent-skills = "0.2"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# For async concurrency
+futures = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

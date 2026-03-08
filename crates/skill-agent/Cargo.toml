@@ -1,0 +1,28 @@
+[package]
+name = "skill-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+skill-core = { path = "../skill-core" }
+skill-registry = { path = "../skill-registry" }
+skill-embeddings = { path = "../skill-embeddings" }
+skill-discovery = { path = "../skill-discovery" }
+skill-executor = { path = "../skill-executor" }
+skill-tools = { path = "../skill-tools" }
+skill-llm = { path = "../skill-llm" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
+
+[dev-dependencies]
+tempfile = "3"
