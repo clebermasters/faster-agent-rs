@@ -769,30 +769,43 @@ impl Agent {
         self
     }
 
-    pub async fn run(&self, task: &str) -> Result<String> {
-        let system_prompt = r#"You are an autonomous agent that MUST use tools to complete tasks.
+    fn build_system_prompt(&self) -> String {
+        let mut tools_list = Vec::new();
+        
+        // Add regular tools
+        for tool in self.tool_registry.list() {
+            tools_list.push(format!("- {}: {}", tool.name, tool.description));
+        }
+        
+        // Add MCP tools
+        if let Some(ref mcp) = self.mcp_registry {
+            for tool in mcp.list() {
+                tools_list.push(format!("- {}: {}", tool.name, tool.description));
+            }
+        }
+        
+        let tools_str = if tools_list.is_empty() {
+            "No tools available".to_string()
+        } else {
+            tools_list.join("\n")
+        };
+        
+        format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
 
 AVAILABLE TOOLS:
-- bash: Execute shell commands
-- read: Read files  
-- write: Write/save content to files (THIS IS HOW YOU SAVE SCRAPED CONTENT)
-- skill_web-scraper: Returns scraped HTML content
-- skill_rss-fetcher: Returns RSS feed content  
-- skill_code-review: Reviews code
+{}
 
 STRICT RULES:
-1. If you get content from skill_web-scraper, you MUST call 'write' to save it
-2. If you get content from skill_rss-fetcher, you MUST call 'write' to save it
+1. You MUST use tools to complete tasks
+2. If you get content from a scraping tool, you MUST call 'write' to save it
 3. NEVER just output content - you MUST save it to a file with 'write'
-4. The task is NOT done until content is saved to a file
+4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
 
-Example - "scrape example.com save to file.html":
-- Step 1: Call skill_web-scraper with URL
-- Step 2: Copy the scraped content from result
-- Step 3: Call write with path="file.html" and content="<paste scraped content>"
-- Step 4: Task complete
+When you finish a task, provide a summary of what was done."#, tools_str)
+    }
 
-The 'write' tool is REQUIRED to save any content. It is your job to save things!"#;
+    pub async fn run(&self, task: &str) -> Result<String> {
+        let system_prompt = self.build_system_prompt();
 
         let mut messages = vec![
             Message {
@@ -1093,33 +1106,46 @@ impl StreamingAgent {
         self
     }
 
+    fn build_system_prompt(&self) -> String {
+        let mut tools_list = Vec::new();
+        
+        // Add regular tools
+        for tool in self.tool_registry.list() {
+            tools_list.push(format!("- {}: {}", tool.name, tool.description));
+        }
+        
+        // Add MCP tools
+        if let Some(ref mcp) = self.mcp_registry {
+            for tool in mcp.list() {
+                tools_list.push(format!("- {}: {}", tool.name, tool.description));
+            }
+        }
+        
+        let tools_str = if tools_list.is_empty() {
+            "No tools available".to_string()
+        } else {
+            tools_list.join("\n")
+        };
+        
+        format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
+
+AVAILABLE TOOLS:
+{}
+
+STRICT RULES:
+1. You MUST use tools to complete tasks
+2. If you get content from a scraping tool, you MUST call 'write' to save it
+3. NEVER just output content - you MUST save it to a file with 'write'
+4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
+
+When you finish a task, provide a summary of what was done."#, tools_str)
+    }
+
     pub async fn run(&self, task: &str) -> Result<String> {
         println!("\n{}", Self::header("AGENT STARTED"));
         println!("{} {}\n", Self::icon("task"), task);
 
-        let system_prompt = r#"You are an autonomous agent that MUST use tools to complete tasks.
-
-AVAILABLE TOOLS:
-- bash: Execute shell commands
-- read: Read files  
-- write: Write/save content to files (THIS IS HOW YOU SAVE SCRAPED CONTENT)
-- skill_web-scraper: Returns scraped HTML content
-- skill_rss-fetcher: Returns RSS feed content  
-- skill_code-review: Reviews code
-
-STRICT RULES:
-1. If you get content from skill_web-scraper, you MUST call 'write' to save it
-2. If you get content from skill_rss-fetcher, you MUST call 'write' to save it
-3. NEVER just output content - you MUST save it to a file with 'write'
-4. The task is NOT done until content is saved to a file
-
-Example - "scrape example.com save to file.html":
-- Step 1: Call skill_web-scraper with URL
-- Step 2: Copy the scraped content from result
-- Step 3: Call write with path="file.html" and content="<paste scraped content>"
-- Step 4: Task complete
-
-The 'write' tool is REQUIRED to save any content. It is your job to save things!"#;
+        let system_prompt = self.build_system_prompt();
 
         let mut messages = vec![
             Message {
