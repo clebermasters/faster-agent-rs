@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::*;
 use futures::Stream;
 use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -743,6 +744,19 @@ impl LLMClient for OllamaClient {
     }
 }
 
+fn create_spinner(msg: &str) -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
+            .template("{spinner:.cyan} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message(msg.to_string());
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+    spinner
+}
+
 pub struct Agent {
     llm: Box<dyn LLMClient>,
     tool_registry: ToolRegistry,
@@ -891,10 +905,14 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                 );
             }
 
-            let response = self
+            let spinner = create_spinner("🤔 Thinking...");
+            let response_result = self
                 .llm
                 .chat(messages.clone(), Some(tool_defs.clone()))
-                .await?;
+                .await;
+            spinner.finish_and_clear();
+            
+            let response = response_result?;
 
             debug!(
                 "LLM response - has_tool_calls: {}, content_len: {}",
@@ -948,7 +966,10 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                             call.arguments.clone()
                         };
 
-                        let result = tool.execute(args).await?;
+                        let tool_spinner = create_spinner(&format!("Executing {}...", call.name).yellow().to_string());
+                        let result = tool.execute(args).await;
+                        tool_spinner.finish_and_clear();
+                        let result = result?;
 
                         if result.success {
                             println!("{} {} returned {} characters.", "✅ Success:".bold().green(), call.name.bold(), result.output.len());
@@ -980,7 +1001,6 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                         });
 
                         // Ask LLM what to do next
-                        println!("\n{}", "🤔 Thinking...".bold().cyan());
                         messages.push(Message {
                             role: "system".to_string(),
                             content: format!(
@@ -1022,7 +1042,11 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                             call.arguments.clone()
                         };
 
-                        match mcp.call_tool(&mcp_tool_name, args).await {
+                        let tool_spinner = create_spinner(&format!("Executing MCP tool {}...", mcp_tool_name).yellow().to_string());
+                        let mcp_result = mcp.call_tool(&mcp_tool_name, args).await;
+                        tool_spinner.finish_and_clear();
+
+                        match mcp_result {
                             Ok(result) => {
                                 println!("{} {} returned {} characters.", "✅ Success:".bold().green(), mcp_tool_name.bold(), result.len());
                                 messages.push(Message {
@@ -1031,7 +1055,6 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                     tool_call_id: call.id.clone(),
                                 });
 
-                                println!("\n{}", "🤔 Thinking...".bold().cyan());
                                 messages.push(Message {
                                     role: "system".to_string(),
                                     content: format!(
@@ -1083,7 +1106,6 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                 if final_response.trim().is_empty() {
                     // Empty response - prompt the LLM to try again
                     debug!("LLM returned empty response, prompting to continue...");
-                    println!("\n{}", "🤔 Thinking...".bold().cyan());
                     messages.push(Message {
                         role: "system".to_string(),
                         content: "You MUST use a tool to complete the task. If you got content from a skill, use the 'write' tool to save it. What tool will you call next?".to_string(),
@@ -1287,6 +1309,7 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                 Self::iteration_header(iteration + 1, self.max_iterations)
             );
 
+            let mut spinner = Some(create_spinner("🤔 Thinking..."));
             let response_stream = self
                 .llm
                 .chat_streaming(messages.clone(), Some(tool_defs.clone()));
@@ -1301,6 +1324,9 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
             let mut chunk_count = 0;
 
             while let Some(chunk_result) = response_stream.next().await {
+                if let Some(s) = spinner.take() {
+                    s.finish_and_clear();
+                }
                 chunk_count += 1;
                 let chunk = match chunk_result {
                     Ok(c) => c,
@@ -1376,6 +1402,9 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                     break;
                 }
             }
+            if let Some(s) = spinner.take() {
+                s.finish_and_clear();
+            }
 
             info!("[STREAM] Stream consumption complete. Total chunks: {}, accumulated_content: {} chars, final_tool_calls: {:?}, is_done: {}", 
                 chunk_count, accumulated_content.len(), final_tool_calls, is_done);
@@ -1439,7 +1468,10 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                 call.arguments.clone()
                             };
 
-                            let result = tool.execute(args).await?;
+                            let tool_spinner = create_spinner(&format!("Executing {}...", call.name).yellow().to_string());
+                            let result = tool.execute(args).await;
+                            tool_spinner.finish_and_clear();
+                            let result = result?;
 
                             if result.success {
                                 println!(
@@ -1532,7 +1564,11 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                 call.arguments.clone()
                             };
 
-                            match mcp.call_tool(&mcp_tool_name, args).await {
+                            let tool_spinner = create_spinner(&format!("Executing MCP tool {}...", mcp_tool_name).yellow().to_string());
+                            let mcp_result = mcp.call_tool(&mcp_tool_name, args).await;
+                            tool_spinner.finish_and_clear();
+
+                            match mcp_result {
                                 Ok(result) => {
                                     println!(
                                         "{} {}",
