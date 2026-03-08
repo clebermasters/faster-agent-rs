@@ -10,6 +10,7 @@ description = "LLM providers integration for the Skill Agent framework"
 [dependencies]
 anyhow = { workspace = true }
 async-stream = { workspace = true }
+colored = "3"
 futures = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

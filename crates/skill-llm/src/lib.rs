@@ -1,4 +1,5 @@
 use anyhow::Result;
+use colored::*;
 use futures::Stream;
 use futures::StreamExt;
 use reqwest::Client;
@@ -910,17 +911,12 @@ When you finish a task, provide a summary of what was done."#,
             }
 
             if let Some(tool_calls) = response.tool_calls {
-                info!("LLM returned {} tool call(s)", tool_calls.len());
-
                 // Execute tool calls ONE AT A TIME and ask LLM for next step after each
                 // This enables chaining - LLM sees result before deciding next action
                 for (i, call) in tool_calls.iter().enumerate() {
-                    info!(
-                        "  -> Tool {}: {} args: {:?}",
-                        i + 1,
-                        call.name,
-                        call.arguments
-                    );
+                    let formatted_args = serde_json::to_string_pretty(&call.arguments).unwrap_or_else(|_| format!("{:?}", call.arguments));
+                    println!("\n{} {}", "⚙️  Action:".bold().yellow(), call.name.bold().white());
+                    println!("{}", formatted_args.dimmed());
 
                     let call_key = format!("{}:{}", call.name, call.arguments);
                     let count = tool_history.entry(call_key.clone()).or_insert(0);
@@ -928,7 +924,7 @@ When you finish a task, provide a summary of what was done."#,
                     debug!("Tool '{}' call count: {}", call.name, count);
 
                     if *count > 2 {
-                        warn!("Doom loop detected: {} called {} times", call.name, count);
+                        println!("{} {} {}", "⚠️  Warning:".bold().yellow(), call.name.bold(), "called multiple times. Forcing a different approach.".dimmed());
                         messages.push(Message {
                             role: "tool".to_string(),
                             content: format!(
@@ -943,7 +939,7 @@ When you finish a task, provide a summary of what was done."#,
 
                     // Check if it's a regular tool
                     if let Some(tool) = self.tool_registry.get(&call.name) {
-                        info!("Executing tool: {}", call.name);
+                        debug!("Executing tool: {}", call.name);
 
                         // Handle arguments - MiniMax sends them as a string, need to parse
                         let args = if let Some(s) = call.arguments.as_str() {
@@ -954,16 +950,19 @@ When you finish a task, provide a summary of what was done."#,
 
                         let result = tool.execute(args).await?;
 
-                        info!(
-                            "Tool {} result: success={}, output_len={}",
-                            call.name,
-                            result.success,
-                            result.output.len()
-                        );
+                        if result.success {
+                            println!("{} {} returned {} characters.", "✅ Success:".bold().green(), call.name.bold(), result.output.len());
+                        } else {
+                            if let Some(err) = &result.error {
+                                println!("{} {} failed: {}", "❌ Error:".bold().red(), call.name.bold(), err);
+                            } else {
+                                println!("{} {} failed.", "❌ Error:".bold().red(), call.name.bold());
+                            }
+                        }
 
                         // If write tool succeeded, task is complete
                         if call.name == "write" && result.success {
-                            info!("Write tool succeeded - task complete!");
+                            debug!("Write tool succeeded - task complete!");
                             return Ok(format!(
                                 "Task completed successfully! Saved content to: {}",
                                 call.arguments
@@ -981,6 +980,7 @@ When you finish a task, provide a summary of what was done."#,
                         });
 
                         // Ask LLM what to do next
+                        println!("\n{}", "🤔 Thinking...".bold().cyan());
                         messages.push(Message {
                             role: "system".to_string(),
                             content: format!(
@@ -1011,7 +1011,7 @@ When you finish a task, provide a summary of what was done."#,
                             }
                         };
 
-                        info!(
+                        debug!(
                             "Executing MCP tool: {} (matched from {})",
                             mcp_tool_name, call.name
                         );
@@ -1024,13 +1024,14 @@ When you finish a task, provide a summary of what was done."#,
 
                         match mcp.call_tool(&mcp_tool_name, args).await {
                             Ok(result) => {
-                                info!("MCP tool {} result: len={}", mcp_tool_name, result.len());
+                                println!("{} {} returned {} characters.", "✅ Success:".bold().green(), mcp_tool_name.bold(), result.len());
                                 messages.push(Message {
                                     role: "tool".to_string(),
                                     content: result,
                                     tool_call_id: call.id.clone(),
                                 });
 
+                                println!("\n{}", "🤔 Thinking...".bold().cyan());
                                 messages.push(Message {
                                     role: "system".to_string(),
                                     content: format!(
@@ -1045,7 +1046,7 @@ When you finish a task, provide a summary of what was done."#,
                                 break;
                             }
                             Err(e) => {
-                                error!("MCP tool {} failed: {}", mcp_tool_name, e);
+                                println!("{} {} failed: {}", "❌ Error:".bold().red(), mcp_tool_name.bold(), e);
                                 messages.push(Message {
                                     role: "tool".to_string(),
                                     content: format!(
@@ -1058,7 +1059,7 @@ When you finish a task, provide a summary of what was done."#,
                             }
                         }
                     } else {
-                        error!("Tool not found: {}", call.name);
+                        println!("{} {} not found.", "❌ Error:".bold().red(), call.name.bold());
                         messages.push(Message {
                             role: "tool".to_string(),
                             content: format!("ERROR: Tool '{}' not found.", call.name),
@@ -1075,9 +1076,14 @@ When you finish a task, provide a summary of what was done."#,
                     &final_response[..final_response.len().min(200)]
                 );
 
+                if !final_response.trim().is_empty() {
+                    println!("\n{}", final_response.trim());
+                }
+
                 if final_response.trim().is_empty() {
                     // Empty response - prompt the LLM to try again
-                    info!("LLM returned empty response, prompting to continue...");
+                    debug!("LLM returned empty response, prompting to continue...");
+                    println!("\n{}", "🤔 Thinking...".bold().cyan());
                     messages.push(Message {
                         role: "system".to_string(),
                         content: "You MUST use a tool to complete the task. If you got content from a skill, use the 'write' tool to save it. What tool will you call next?".to_string(),

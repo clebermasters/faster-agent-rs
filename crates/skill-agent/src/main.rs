@@ -1,6 +1,7 @@
 mod agents;
 
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use skill_core::{Config, SkillQuery};
 use skill_discovery::SkillDiscoveryEngine;
 use skill_embeddings::EmbeddingService;
@@ -123,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
         .with_max_level(if cli.verbose {
             Level::DEBUG
         } else {
-            Level::INFO
+            Level::WARN
         })
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
@@ -343,17 +344,20 @@ async fn main() -> anyhow::Result<()> {
 
                 let agent = agent;
 
-                println!("=== Skill Agent (Streaming Mode) ===");
-                println!("Type 'quit' to exit\n");
+                println!(
+                    "\n{}",
+                    "🤖 Skill Agent (Streaming Mode) initialized.".bold().cyan()
+                );
+                println!("{}\n", "Type 'quit' or 'exit' to end the session.".dimmed());
 
                 if !task.is_empty() {
                     let result = agent.run(&task).await?;
-                    println!("\n=== Final Result ===\n{}", result);
+                    println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
                 }
 
                 use std::io::{self, Write};
                 loop {
-                    print!("\n> ");
+                    print!("\n{} ", ">".bold().cyan());
                     io::stdout().flush()?;
 
                     let mut input = String::new();
@@ -366,7 +370,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if !input.is_empty() {
                         let result = agent.run(input).await?;
-                        println!("\n=== Final Result ===\n{}", result);
+                        println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
                     }
                 }
             } else {
@@ -381,17 +385,17 @@ async fn main() -> anyhow::Result<()> {
 
                 let agent = agent_builder;
 
-                println!("=== Skill Agent ===");
-                println!("Type 'quit' to exit\n");
+                println!("\n{}", "🤖 Skill Agent initialized.".bold().cyan());
+                println!("{}\n", "Type 'quit' or 'exit' to end the session.".dimmed());
 
                 if !task.is_empty() {
                     let result = agent.run(&task).await?;
-                    println!("\n=== Result ===\n{}", result);
+                    println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
                 }
 
                 use std::io::{self, Write};
                 loop {
-                    print!("\n> ");
+                    print!("\n{} ", ">".bold().cyan());
                     io::stdout().flush()?;
 
                     let mut input = String::new();
@@ -404,7 +408,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if !input.is_empty() {
                         let result = agent.run(input).await?;
-                        println!("\n=== Result ===\n{}", result);
+                        println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
                     }
                 }
             }
