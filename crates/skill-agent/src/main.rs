@@ -3,7 +3,7 @@ use skill_core::{Config, SkillQuery};
 use skill_discovery::SkillDiscoveryEngine;
 use skill_embeddings::EmbeddingService;
 use skill_executor::{ExecutionContext, SkillExecutor};
-use skill_llm::{Agent, MiniMaxClient, OllamaClient};
+use skill_llm::{Agent, MiniMaxClient, OllamaClient, StreamingAgent};
 use skill_registry::SkillRegistry;
 use skill_tools::{BashTool, ReadTool, SkillTool, ToolBox, ToolRegistry, WriteTool};
 use std::path::PathBuf;
@@ -46,6 +46,9 @@ struct Cli {
 
     #[arg(short, long)]
     verbose: bool,
+
+    #[arg(long, default_value = "false")]
+    streaming: bool,
 }
 
 #[derive(Subcommand)]
@@ -233,32 +236,63 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             
-            let agent = Agent::new(llm).with_tools(tools).with_max_iterations(10);
+            if cli.streaming {
+                let agent = StreamingAgent::new(llm).with_tools(tools).with_max_iterations(10);
 
-            println!("=== Skill Agent ===");
-            println!("Type 'quit' to exit\n");
+                println!("=== Skill Agent (Streaming Mode) ===");
+                println!("Type 'quit' to exit\n");
 
-            if !task.is_empty() {
-                let result = agent.run(&task).await?;
-                println!("\n=== Result ===\n{}", result);
-            }
-
-            use std::io::{self, Write};
-            loop {
-                print!("\n> ");
-                io::stdout().flush()?;
-                
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                
-                let input = input.trim();
-                if input == "quit" || input == "exit" {
-                    break;
+                if !task.is_empty() {
+                    let result = agent.run(&task).await?;
+                    println!("\n=== Final Result ===\n{}", result);
                 }
 
-                if !input.is_empty() {
-                    let result = agent.run(input).await?;
+                use std::io::{self, Write};
+                loop {
+                    print!("\n> ");
+                    io::stdout().flush()?;
+                    
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    
+                    let input = input.trim();
+                    if input == "quit" || input == "exit" {
+                        break;
+                    }
+
+                    if !input.is_empty() {
+                        let result = agent.run(input).await?;
+                        println!("\n=== Final Result ===\n{}", result);
+                    }
+                }
+            } else {
+                let agent = Agent::new(llm).with_tools(tools).with_max_iterations(10);
+
+                println!("=== Skill Agent ===");
+                println!("Type 'quit' to exit\n");
+
+                if !task.is_empty() {
+                    let result = agent.run(&task).await?;
                     println!("\n=== Result ===\n{}", result);
+                }
+
+                use std::io::{self, Write};
+                loop {
+                    print!("\n> ");
+                    io::stdout().flush()?;
+                    
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    
+                    let input = input.trim();
+                    if input == "quit" || input == "exit" {
+                        break;
+                    }
+
+                    if !input.is_empty() {
+                        let result = agent.run(input).await?;
+                        println!("\n=== Result ===\n{}", result);
+                    }
                 }
             }
         }

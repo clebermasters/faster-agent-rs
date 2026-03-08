@@ -14,4 +14,3 @@ target/
 *.log
 coverage/
 skills/bedrock-models/data
-skill-agent.db
