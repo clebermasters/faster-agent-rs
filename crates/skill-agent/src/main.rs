@@ -42,7 +42,7 @@ struct Cli {
     llm_provider: String,
 
     #[arg(long, env = "MAX_ITERATIONS", default_value = "10")]
-    max_iterations: usize,
+    max_iterations: i32,
 
     #[arg(long)]
     minimax_url: Option<String>,
@@ -337,10 +337,11 @@ async fn main() -> anyhow::Result<()> {
             let extra_prompt = extra_system_prompt.clone();
 
             if cli.streaming {
+                let max_iters = if cli.max_iterations < 0 { usize::MAX } else { cli.max_iterations as usize };
                 let mut agent = StreamingAgent::new(llm)
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
-                    .with_max_iterations(cli.max_iterations);
+                    .with_max_iterations(max_iters);
 
                 if let Some(prompt) = extra_prompt {
                     agent = agent.with_extra_system_prompt(prompt);
@@ -381,10 +382,11 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             } else {
+                let max_iters = if cli.max_iterations < 0 { usize::MAX } else { cli.max_iterations as usize };
                 let mut agent_builder = Agent::new(llm)
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
-                    .with_max_iterations(cli.max_iterations);
+                    .with_max_iterations(max_iters);
 
                 if let Some(prompt) = extra_system_prompt {
                     agent_builder = agent_builder.with_extra_system_prompt(prompt);
