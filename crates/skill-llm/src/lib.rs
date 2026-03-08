@@ -812,12 +812,12 @@ AVAILABLE TOOLS:
 {}
 
 STRICT RULES:
-1. You MUST use tools to complete tasks
-2. If you get content from a scraping tool, you MUST call 'write' to save it
-3. NEVER just output content - you MUST save it to a file with 'write'
-4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
+1. You MUST use tools to gather information or execute actions when needed.
+2. ALWAYS format your final responses to the user in clean Markdown.
+3. NEVER create or write files using the 'write' tool UNLESS the user explicitly asks you to save, write, or create a file.
+4. If the user asks a question, use tools to find the answer and print the summary directly.
 
-When you finish a task, provide a summary of what was done."#,
+When you finish a task, provide a clear, formatted summary of what was done."#,
             tools_str
         );
 
@@ -1218,12 +1218,12 @@ AVAILABLE TOOLS:
 {}
 
 STRICT RULES:
-1. You MUST use tools to complete tasks
-2. If you get content from a scraping tool, you MUST call 'write' to save it
-3. NEVER just output content - you MUST save it to a file with 'write'
-4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
+1. You MUST use tools to gather information or execute actions when needed.
+2. ALWAYS format your final responses to the user in clean Markdown.
+3. NEVER create or write files using the 'write' tool UNLESS the user explicitly asks you to save, write, or create a file.
+4. If the user asks a question, use tools to find the answer and print the summary directly.
 
-When you finish a task, provide a summary of what was done."#,
+When you finish a task, provide a clear, formatted summary of what was done."#,
             tools_str
         );
 
