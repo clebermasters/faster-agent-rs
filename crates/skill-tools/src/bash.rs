@@ -54,15 +54,16 @@ impl BashTool {
 
     pub async fn execute(&self, params: serde_json::Value) -> Result<ToolResult, ToolError> {
         info!("Bash tool executing with params: {:?}", params);
-        
-        let params: BashParams = serde_json::from_value(params)
-            .map_err(|e| {
-                warn!("Bash tool failed to parse params: {}", e);
-                ToolError::InvalidParameters(e.to_string())
-            })?;
 
-        debug!("Parsed bash command: {}, timeout: {:?}, workdir: {:?}", 
-            params.command, params.timeout, params.workdir);
+        let params: BashParams = serde_json::from_value(params).map_err(|e| {
+            warn!("Bash tool failed to parse params: {}", e);
+            ToolError::InvalidParameters(e.to_string())
+        })?;
+
+        debug!(
+            "Parsed bash command: {}, timeout: {:?}, workdir: {:?}",
+            params.command, params.timeout, params.workdir
+        );
 
         let mut cmd = Command::new("bash");
         cmd.arg("-c")
@@ -77,7 +78,9 @@ impl BashTool {
 
         let output = if let Some(timeout) = params.timeout_ms() {
             debug!("Executing with timeout: {}ms", timeout);
-            match tokio::time::timeout(std::time::Duration::from_millis(timeout), cmd.output()).await {
+            match tokio::time::timeout(std::time::Duration::from_millis(timeout), cmd.output())
+                .await
+            {
                 Ok(Ok(output)) => {
                     debug!("Bash command completed successfully");
                     output
@@ -121,9 +124,13 @@ impl BashTool {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
         let success = output.status.success();
-        debug!("Bash exit status: {}, stdout_len: {}, stderr_len: {}", 
-            output.status, stdout.len(), stderr.len());
-        
+        debug!(
+            "Bash exit status: {}, stdout_len: {}, stderr_len: {}",
+            output.status,
+            stdout.len(),
+            stderr.len()
+        );
+
         let output_str = if stderr.is_empty() {
             stdout
         } else {
@@ -135,8 +142,12 @@ impl BashTool {
             output: output_str,
             error: if success { None } else { Some(stderr) },
         };
-        
-        info!("Bash tool result: success={}, output_len={}", result.success, result.output.len());
+
+        info!(
+            "Bash tool result: success={}, output_len={}",
+            result.success,
+            result.output.len()
+        );
         Ok(result)
     }
 }

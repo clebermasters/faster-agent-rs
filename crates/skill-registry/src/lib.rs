@@ -23,7 +23,7 @@ impl SkillRegistry {
 
     pub async fn load(&mut self) -> Result<(), RegistryError> {
         self.skills.clear();
-        
+
         if !self.skills_dir.exists() {
             warn!("Skills directory does not exist: {:?}", self.skills_dir);
             return Ok(());
@@ -56,7 +56,7 @@ impl SkillRegistry {
             .ok_or_else(|| RegistryError::InvalidPath("SKILL.md has no parent".into()))?;
 
         let content = tokio::fs::read_to_string(skill_md_path).await?;
-        
+
         let (frontmatter, body) = parse_skill_md(&content)?;
 
         let name = frontmatter

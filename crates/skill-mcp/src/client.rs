@@ -94,10 +94,14 @@ impl McpClient {
             .spawn()
             .map_err(|e| McpError::Connection(format!("Failed to spawn MCP server: {}", e)))?;
 
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| McpError::Connection("Failed to capture stdout".to_string()))?;
-        
-        let stdin = child.stdin.take()
+
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| McpError::Connection("Failed to capture stdin".to_string()))?;
 
         let (response_tx, response_rx) = tokio::sync::mpsc::channel::<String>(100);
@@ -106,7 +110,7 @@ impl McpClient {
         // Spawn a task to read from stdout
         let mut reader = BufReader::new(stdout).lines();
         let response_tx_clone = response_tx.clone();
-        
+
         tokio::spawn(async move {
             while let Ok(Some(line)) = reader.next_line().await {
                 debug!("MCP raw response: {}", line);
@@ -122,7 +126,11 @@ impl McpClient {
             let mut stdin = stdin;
             while let Some(request) = request_rx.recv().await {
                 debug!("MCP request: {}", request);
-                if stdin.write_all(format!("{}\n", request).as_bytes()).await.is_err() {
+                if stdin
+                    .write_all(format!("{}\n", request).as_bytes())
+                    .await
+                    .is_err()
+                {
                     break;
                 }
                 if stdin.flush().await.is_err() {
@@ -147,14 +155,19 @@ impl McpClient {
         };
 
         // Initialize
-        let _ = client.call_method("initialize", Some(json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {
-                "name": "skill-agent",
-                "version": "0.1.0"
-            }
-        }))).await;
+        let _ = client
+            .call_method(
+                "initialize",
+                Some(json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "skill-agent",
+                        "version": "0.1.0"
+                    }
+                })),
+            )
+            .await;
 
         // Send initialized notification
         let _ = client.call_method("notifications/initialized", None).await;
@@ -162,38 +175,54 @@ impl McpClient {
         // List tools
         let tools = client.list_tools().await?;
 
-        info!("Connected to MCP server '{}' with {} tools", name, tools.len());
+        info!(
+            "Connected to MCP server '{}' with {} tools",
+            name,
+            tools.len()
+        );
 
         Ok(client)
     }
 
     pub async fn list_tools(&mut self) -> Result<Vec<McpToolDefinition>> {
         let response = self.call_method("tools/list", None).await?;
-        
-        let result = response.result
+
+        let result = response
+            .result
             .ok_or_else(|| McpError::Server("No result in response".to_string()))?;
 
         let tools_result: ListToolsResult = serde_json::from_value(result)
             .map_err(|e| McpError::Parse(format!("Failed to parse tools list: {}", e)))?;
 
-        Ok(tools_result.tools.into_iter().map(|t| McpToolDefinition {
-            name: t.name,
-            description: t.description.unwrap_or_default(),
-            input_schema: t.input_schema.unwrap_or(json!({"type": "object"})),
-        }).collect())
+        Ok(tools_result
+            .tools
+            .into_iter()
+            .map(|t| McpToolDefinition {
+                name: t.name,
+                description: t.description.unwrap_or_default(),
+                input_schema: t.input_schema.unwrap_or(json!({"type": "object"})),
+            })
+            .collect())
     }
 
     pub async fn call_tool(&mut self, name: &str, arguments: serde_json::Value) -> Result<String> {
-        let response = self.call_method("tools/call", Some(json!({
-            "name": name,
-            "arguments": arguments
-        }))).await?;
+        let response = self
+            .call_method(
+                "tools/call",
+                Some(json!({
+                    "name": name,
+                    "arguments": arguments
+                })),
+            )
+            .await?;
 
-        let result = response.result
+        let result = response
+            .result
             .ok_or_else(|| McpError::Server("No result in response".to_string()))?;
 
         // Extract content from the result
-        let content = result.get("content")
+        let content = result
+            .get("content")
             .and_then(|c| c.as_array())
             .and_then(|c| c.first())
             .and_then(|c| c.get("text"))
@@ -204,9 +233,13 @@ impl McpClient {
         Ok(content)
     }
 
-    async fn call_method(&mut self, method: &str, params: Option<serde_json::Value>) -> Result<JsonRpcResponse> {
+    async fn call_method(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<JsonRpcResponse> {
         self.request_id += 1;
-        
+
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: self.request_id,
@@ -219,24 +252,34 @@ impl McpClient {
 
         // Send request via stdin
         if let Some(ref stdin) = self.stdin {
-            stdin.send(request_json).await
+            stdin
+                .send(request_json)
+                .await
                 .map_err(|e| McpError::Connection(format!("Failed to send request: {}", e)))?;
         } else {
             return Err(McpError::Connection("Stdin not available".to_string()));
         }
 
         // Wait for response with timeout
-        let response_str = match tokio::time::timeout(Duration::from_secs(30), self.reader.recv()).await {
-            Ok(Some(response)) => response,
-            Ok(None) => return Err(McpError::Connection("MCP server closed connection".to_string())),
-            Err(_) => return Err(McpError::Timeout("MCP server response timeout".to_string())),
-        };
+        let response_str =
+            match tokio::time::timeout(Duration::from_secs(30), self.reader.recv()).await {
+                Ok(Some(response)) => response,
+                Ok(None) => {
+                    return Err(McpError::Connection(
+                        "MCP server closed connection".to_string(),
+                    ))
+                }
+                Err(_) => return Err(McpError::Timeout("MCP server response timeout".to_string())),
+            };
 
         let response: JsonRpcResponse = serde_json::from_str(&response_str)
             .map_err(|e| McpError::Parse(format!("Failed to parse response: {}", e)))?;
 
         if let Some(error) = response.error {
-            return Err(McpError::Server(format!("JSON-RPC error {}: {}", error.code, error.message)));
+            return Err(McpError::Server(format!(
+                "JSON-RPC error {}: {}",
+                error.code, error.message
+            )));
         }
 
         Ok(response)
@@ -273,44 +316,46 @@ impl McpRegistry {
 
     pub async fn load_from_config(&mut self, config: &crate::config::McpConfig) -> Result<()> {
         info!("Loading MCP servers from config");
-        
+
         for (name, server_config) in config.servers.iter() {
             let (command, args, env) = match server_config {
                 crate::config::McpServerConfig::Stdio(s) => {
                     (s.command.clone(), s.args.clone(), s.env.clone())
                 }
                 crate::config::McpServerConfig::Sse(_) => {
-                    warn!("SSE transport not supported yet, skipping server '{}'", name);
+                    warn!(
+                        "SSE transport not supported yet, skipping server '{}'",
+                        name
+                    );
                     continue;
                 }
             };
 
-            match McpClient::connect_stdio(
-                name.clone(),
-                command,
-                args,
-                env,
-                self.timeout,
-            ).await {
+            match McpClient::connect_stdio(name.clone(), command, args, env, self.timeout).await {
                 Ok(mut client) => {
                     let client_tools = client.list_tools().await?;
-                    
+
                     for tool in client_tools {
                         let full_name = format!("{}_{}", name, tool.name);
                         self.server_names.insert(full_name.clone(), name.clone());
                         self.tools.insert(full_name, tool);
                     }
-                    
-                    self.clients.insert(name.clone(), tokio::sync::RwLock::new(client));
+
+                    self.clients
+                        .insert(name.clone(), tokio::sync::RwLock::new(client));
                 }
                 Err(e) => {
                     warn!("Failed to connect to MCP server '{}': {}", name, e);
                 }
             }
         }
-        
-        info!("MCP registry loaded {} tools from {} servers", self.tools.len(), self.clients.len());
-        
+
+        info!(
+            "MCP registry loaded {} tools from {} servers",
+            self.tools.len(),
+            self.clients.len()
+        );
+
         Ok(())
     }
 
@@ -332,17 +377,23 @@ impl McpRegistry {
     }
 
     pub async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<String> {
-        let tool = self.tools.get(name)
+        let tool = self
+            .tools
+            .get(name)
             .ok_or_else(|| McpError::ToolNotFound(name.to_string()))?;
 
-        let server_name = self.server_names.get(name)
+        let server_name = self
+            .server_names
+            .get(name)
             .ok_or_else(|| McpError::Connection(format!("Server not found for tool: {}", name)))?;
 
-        let client = self.clients.get(server_name)
+        let client = self
+            .clients
+            .get(server_name)
             .ok_or_else(|| McpError::Connection(format!("Client not found: {}", server_name)))?;
 
         let mut client = client.write().await;
-        
+
         client.call_tool(&tool.name, arguments).await
     }
 
@@ -360,13 +411,13 @@ impl McpRegistry {
 
     pub async fn shutdown(&mut self) {
         info!("Shutting down MCP registry");
-        
+
         for (name, client) in self.clients.drain() {
             let mut c = client.write().await;
             c.disconnect().await;
             debug!("Disconnected MCP server: {}", name);
         }
-        
+
         self.tools.clear();
         self.server_names.clear();
     }

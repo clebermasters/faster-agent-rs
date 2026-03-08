@@ -46,7 +46,7 @@ impl ReadTool {
                         "description": "Line number to start reading from (1-indexed, optional)"
                     },
                     "limit": {
-                        "type": "number", 
+                        "type": "number",
                         "description": "Maximum number of lines to read (optional)"
                     }
                 },
@@ -66,8 +66,13 @@ impl ReadTool {
                 let lines: Vec<&str> = content.lines().collect();
                 let total_lines = lines.len();
 
-                let start = params.offset.unwrap_or(1).saturating_sub(1).min(total_lines);
-                let end = params.limit
+                let start = params
+                    .offset
+                    .unwrap_or(1)
+                    .saturating_sub(1)
+                    .min(total_lines);
+                let end = params
+                    .limit
                     .map(|l| (start + l).min(total_lines))
                     .unwrap_or(total_lines);
 
@@ -77,8 +82,14 @@ impl ReadTool {
                 Ok(ToolResult {
                     success: true,
                     output: if params.offset.is_some() || params.limit.is_some() {
-                        format!("{} lines {}-{} of {}:\n\n{}", 
-                            path.display(), start + 1, end, total_lines, output)
+                        format!(
+                            "{} lines {}-{} of {}:\n\n{}",
+                            path.display(),
+                            start + 1,
+                            end,
+                            total_lines,
+                            output
+                        )
                     } else {
                         output
                     },

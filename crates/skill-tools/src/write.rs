@@ -50,7 +50,7 @@ impl WriteTool {
                 "type": "object",
                 "properties": {
                     "path": {
-                        "type": "string", 
+                        "type": "string",
                         "description": "Path to the file to write"
                     },
                     "content": {
@@ -69,15 +69,18 @@ impl WriteTool {
 
     pub async fn execute(&self, params: serde_json::Value) -> Result<ToolResult, ToolError> {
         info!("Write tool executing with params: {:?}", params);
-        
-        let params: WriteParams = serde_json::from_value(params)
-            .map_err(|e| {
-                warn!("Write tool failed to parse params: {}", e);
-                ToolError::InvalidParameters(e.to_string())
-            })?;
+
+        let params: WriteParams = serde_json::from_value(params).map_err(|e| {
+            warn!("Write tool failed to parse params: {}", e);
+            ToolError::InvalidParameters(e.to_string())
+        })?;
 
         let path = self.resolve_path(&params.path);
-        debug!("Resolved path: {:?}, append: {:?}", path, params.append_bool());
+        debug!(
+            "Resolved path: {:?}, append: {:?}",
+            path,
+            params.append_bool()
+        );
         debug!("Content length: {} chars", params.content.len());
 
         if let Some(parent) = path.parent() {

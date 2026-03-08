@@ -70,10 +70,7 @@ Each skill has:
 }
 
 impl SkillDiscoveryEngine {
-    pub fn new(
-        registry: SkillRegistry,
-        embeddings: EmbeddingService,
-    ) -> Self {
+    pub fn new(registry: SkillRegistry, embeddings: EmbeddingService) -> Self {
         Self {
             registry,
             embeddings,
@@ -89,12 +86,24 @@ impl SkillDiscoveryEngine {
     }
 
     pub async fn index_all(&mut self) -> Result<(), DiscoveryError> {
-        self.embeddings.init_db().await.map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
+        self.embeddings
+            .init_db()
+            .await
+            .map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
 
         let skills = self.registry.get_all();
         for skill in skills {
-            if self.embeddings.get_embedding(&skill.id).await.map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?.is_none() {
-                self.embeddings.index_skill(skill).await.map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
+            if self
+                .embeddings
+                .get_embedding(&skill.id)
+                .await
+                .map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?
+                .is_none()
+            {
+                self.embeddings
+                    .index_skill(skill)
+                    .await
+                    .map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
             }
         }
 
@@ -102,12 +111,15 @@ impl SkillDiscoveryEngine {
         Ok(())
     }
 
-    pub async fn discover(&mut self, query: SkillQuery) -> Result<Vec<DiscoveredSkill>, DiscoveryError> {
+    pub async fn discover(
+        &mut self,
+        query: SkillQuery,
+    ) -> Result<Vec<DiscoveredSkill>, DiscoveryError> {
         let limit = query.limit;
         let threshold = query.threshold;
 
         let semantic_matches: Vec<(String, f64)> = self.semantic_search(&query.task, limit).await?;
-        
+
         let keyword_matches = self.keyword_search(&query.task, limit);
 
         let mut combined = Vec::new();
@@ -119,8 +131,8 @@ impl SkillDiscoveryEngine {
                 .map(|(_, s)| *s)
                 .unwrap_or(0.0);
 
-            let hybrid_score = (semantic_score * self.semantic_weight)
-                + (keyword_score * self.keyword_weight);
+            let hybrid_score =
+                (semantic_score * self.semantic_weight) + (keyword_score * self.keyword_weight);
 
             let match_type = if keyword_score > 0.0 {
                 MatchType::Hybrid
@@ -153,15 +165,31 @@ impl SkillDiscoveryEngine {
             }
         }
 
-        combined.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        combined.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         combined.truncate(limit);
 
-        debug!("Discovered {} skills for query: {}", combined.len(), query.task);
+        debug!(
+            "Discovered {} skills for query: {}",
+            combined.len(),
+            query.task
+        );
         Ok(combined)
     }
 
-    async fn semantic_search(&mut self, task: &str, limit: usize) -> Result<Vec<(String, f64)>, DiscoveryError> {
-        let query_embedding = self.embeddings.embed_text(task).await.map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
+    async fn semantic_search(
+        &mut self,
+        task: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, f64)>, DiscoveryError> {
+        let query_embedding = self
+            .embeddings
+            .embed_text(task)
+            .await
+            .map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
 
         let skill_ids: Vec<String> = self
             .registry
@@ -170,7 +198,8 @@ impl SkillDiscoveryEngine {
             .map(|s| s.id.clone())
             .collect();
 
-        let results = self.embeddings
+        let results = self
+            .embeddings
             .search_similar(&query_embedding, &skill_ids, limit)
             .await
             .map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
@@ -231,7 +260,10 @@ impl SkillDiscoveryEngine {
     }
 
     pub async fn reindex_skill(&mut self, skill: &Skill) -> Result<(), DiscoveryError> {
-        self.embeddings.index_skill(skill).await.map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
+        self.embeddings
+            .index_skill(skill)
+            .await
+            .map_err(|e| DiscoveryError::EmbeddingError(e.to_string()))?;
         Ok(())
     }
 

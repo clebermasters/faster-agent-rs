@@ -16,10 +16,10 @@ pub use write::WriteTool;
 pub enum ToolError {
     #[error("Execution error: {0}")]
     ExecutionError(String),
-    
+
     #[error("Invalid parameters: {0}")]
     InvalidParameters(String),
-    
+
     #[error("Tool not found: {0}")]
     NotFound(String),
 }

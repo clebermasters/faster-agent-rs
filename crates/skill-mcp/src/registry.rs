@@ -28,14 +28,17 @@ impl McpRegistry {
 
     pub async fn load_from_config(&mut self, config: &McpConfig) -> Result<()> {
         info!("Loading MCP servers from config");
-        
+
         for (name, server_config) in config.servers.iter() {
             let (command, args, env) = match server_config {
                 crate::config::McpServerConfig::Stdio(s) => {
                     (s.command.clone(), s.args.clone(), s.env.clone())
                 }
                 crate::config::McpServerConfig::Sse(_) => {
-                    warn!("SSE transport not supported yet, skipping server '{}'", name);
+                    warn!(
+                        "SSE transport not supported yet, skipping server '{}'",
+                        name
+                    );
                     continue;
                 }
             };
@@ -46,26 +49,33 @@ impl McpRegistry {
                 args,
                 env,
                 self.timeout,
-            ).await {
+            )
+            .await
+            {
                 Ok(mut client) => {
                     let client_tools = client.list_tools().await?;
-                    
+
                     for tool in client_tools {
                         let full_name = format!("{}_{}", name, tool.name);
                         self.server_names.insert(full_name.clone(), name.clone());
                         self.tools.insert(full_name, tool);
                     }
-                    
-                    self.clients.insert(name.clone(), tokio::sync::RwLock::new(client));
+
+                    self.clients
+                        .insert(name.clone(), tokio::sync::RwLock::new(client));
                 }
                 Err(e) => {
                     warn!("Failed to connect to MCP server '{}': {}", name, e);
                 }
             }
         }
-        
-        info!("MCP registry loaded {} tools from {} servers", self.tools.len(), self.clients.len());
-        
+
+        info!(
+            "MCP registry loaded {} tools from {} servers",
+            self.tools.len(),
+            self.clients.len()
+        );
+
         Ok(())
     }
 
@@ -86,22 +96,22 @@ impl McpRegistry {
         self.tools.keys().cloned().collect()
     }
 
-    pub async fn call_tool(
-        &self,
-        name: &str,
-        arguments: serde_json::Value,
-    ) -> Result<String> {
-        let tool = self.tools.get(name)
+    pub async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<String> {
+        let tool = self
+            .tools
+            .get(name)
             .ok_or_else(|| crate::error::McpError::ToolNotFound(name.to_string()))?;
 
-        let server_name = self.server_names.get(name)
-            .ok_or_else(|| crate::error::McpError::Connection(format!("Server not found for tool: {}", name)))?;
+        let server_name = self.server_names.get(name).ok_or_else(|| {
+            crate::error::McpError::Connection(format!("Server not found for tool: {}", name))
+        })?;
 
-        let client = self.clients.get(server_name)
-            .ok_or_else(|| crate::error::McpError::Connection(format!("Client not found: {}", server_name)))?;
+        let client = self.clients.get(server_name).ok_or_else(|| {
+            crate::error::McpError::Connection(format!("Client not found: {}", server_name))
+        })?;
 
         let mut client = client.write().await;
-        
+
         client.call_tool(&tool.name, arguments).await
     }
 
@@ -119,13 +129,13 @@ impl McpRegistry {
 
     pub async fn shutdown(&mut self) {
         info!("Shutting down MCP registry");
-        
+
         for (name, client) in self.clients.drain() {
             let mut c = client.write().await;
             c.disconnect().await;
             debug!("Disconnected MCP server: {}", name);
         }
-        
+
         self.tools.clear();
         self.server_names.clear();
     }

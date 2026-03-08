@@ -8,7 +8,7 @@ use skill_tools::{ToolDefinition, ToolRegistry};
 use std::collections::HashMap;
 use std::io::Write;
 use std::pin::Pin;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -41,7 +41,11 @@ pub struct ChatChunk {
 }
 
 pub trait LLMClient: Send + Sync {
-    fn chat(&self, messages: Vec<Message>, tools: Option<Vec<ToolDefinition>>) -> Pin<Box<dyn std::future::Future<Output = Result<ChatResponse>> + Send + '_>>;
+    fn chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<ChatResponse>> + Send + '_>>;
     fn chat_streaming(
         &self,
         messages: Vec<Message>,
@@ -77,7 +81,7 @@ impl LLMClient for MiniMaxClient {
         let base_url = self.base_url.clone();
         let api_key = self.api_key.clone();
         let model = self.model.clone();
-        
+
         Box::pin(async move {
             // Convert system messages to user messages (MiniMax doesn't support system role)
             let messages: Vec<serde_json::Value> = messages
@@ -110,78 +114,79 @@ impl LLMClient for MiniMaxClient {
                 "stream": false,
             });
 
-        if let Some(tools) = tools {
-            let openai_tools: Vec<serde_json::Value> = tools
-                .into_iter()
-                .map(|t| {
-                    json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters
-                        }
+            if let Some(tools) = tools {
+                let openai_tools: Vec<serde_json::Value> = tools
+                    .into_iter()
+                    .map(|t| {
+                        json!({
+                            "type": "function",
+                            "function": {
+                                "name": t.name,
+                                "description": t.description,
+                                "parameters": t.parameters
+                            }
+                        })
                     })
-                })
-                .collect();
-            body["tools"] = serde_json::Value::Array(openai_tools);
-        }
-
-        debug!("MiniMax request body: {}", body);
-
-        debug!("Sending chat request to MiniMax: {}", base_url);
-
-        let response = client
-            .post(format!("{}/v1/chat/completions", base_url))
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            anyhow::bail!("MiniMax API error: {} - {}", status, error_text);
-        }
-
-        let chat_resp: serde_json::Value = response.json().await?;
-
-        let message = chat_resp["choices"][0]["message"].clone();
-        let role = message["role"]
-            .as_str()
-            .unwrap_or("assistant")
-            .to_string();
-        let content = message["content"].as_str().unwrap_or("").to_string();
-
-        let tool_calls = if message.get("tool_calls").is_some() {
-            let calls: Vec<ToolCall> = message["tool_calls"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|c| {
-                    let func = c.get("function")?;
-                    Some(ToolCall {
-                        id: c.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                        name: func["name"].as_str()?.to_string(),
-                        arguments: func["arguments"].clone(),
-                    })
-                })
-                .collect();
-            if calls.is_empty() {
-                None
-            } else {
-                Some(calls)
+                    .collect();
+                body["tools"] = serde_json::Value::Array(openai_tools);
             }
-        } else {
-            None
-        };
 
-        Ok(ChatResponse {
-            message: Message { role, content, tool_call_id: None },
-            tool_calls,
-            done: true,
-        })
+            debug!("MiniMax request body: {}", body);
+
+            debug!("Sending chat request to MiniMax: {}", base_url);
+
+            let response = client
+                .post(format!("{}/v1/chat/completions", base_url))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                anyhow::bail!("MiniMax API error: {} - {}", status, error_text);
+            }
+
+            let chat_resp: serde_json::Value = response.json().await?;
+
+            let message = chat_resp["choices"][0]["message"].clone();
+            let role = message["role"].as_str().unwrap_or("assistant").to_string();
+            let content = message["content"].as_str().unwrap_or("").to_string();
+
+            let tool_calls = if message.get("tool_calls").is_some() {
+                let calls: Vec<ToolCall> = message["tool_calls"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|c| {
+                        let func = c.get("function")?;
+                        Some(ToolCall {
+                            id: c.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            name: func["name"].as_str()?.to_string(),
+                            arguments: func["arguments"].clone(),
+                        })
+                    })
+                    .collect();
+                if calls.is_empty() {
+                    None
+                } else {
+                    Some(calls)
+                }
+            } else {
+                None
+            };
+
+            Ok(ChatResponse {
+                message: Message {
+                    role,
+                    content,
+                    tool_call_id: None,
+                },
+                tool_calls,
+                done: true,
+            })
         })
     }
 
@@ -267,7 +272,7 @@ impl LLMClient for MiniMaxClient {
             info!("[MINIMAX] Streaming response started");
             let mut stream = response.bytes_stream();
             let mut bytes_received = 0;
-            
+
             while let Some(chunk_result) = stream.next().await {
                     let chunk_bytes = match chunk_result {
                         Ok(bytes) => bytes,
@@ -297,7 +302,7 @@ impl LLMClient for MiniMaxClient {
                     if data.is_empty() {
                         continue;
                     }
-                    
+
                     if data == "[DONE]" {
                         info!("[MINIMAX] Received [DONE] signal");
                         yield ChatChunk {
@@ -373,7 +378,7 @@ impl LLMClient for MiniMaxClient {
                     }
                 }
             }
-            
+
             info!("[MINIMAX] Stream ended normally, total bytes: {}", bytes_received);
         })
     }
@@ -440,10 +445,7 @@ impl OllamaClient {
         let chat_resp: serde_json::Value = response.json().await?;
 
         let message = chat_resp["message"].clone();
-        let role = message["role"]
-            .as_str()
-            .unwrap_or("assistant")
-            .to_string();
+        let role = message["role"].as_str().unwrap_or("assistant").to_string();
         let content = message["content"].as_str().unwrap_or("").to_string();
 
         let tool_calls = if message.get("tool_calls").is_some() {
@@ -470,7 +472,11 @@ impl OllamaClient {
         };
 
         Ok(ChatResponse {
-            message: Message { role, content, tool_call_id: None },
+            message: Message {
+                role,
+                content,
+                tool_call_id: None,
+            },
             tool_calls,
             done: chat_resp["done"].as_bool().unwrap_or(true),
         })
@@ -647,7 +653,7 @@ impl LLMClient for OllamaClient {
         let client = self.client.clone();
         let base_url = self.base_url.clone();
         let model = self.model.clone();
-        
+
         Box::pin(async move {
             let mut body = json!({
                 "model": model,
@@ -689,37 +695,38 @@ impl LLMClient for OllamaClient {
             let chat_resp: serde_json::Value = response.json().await?;
 
             let message = chat_resp["message"].clone();
-            let role = message["role"]
-                .as_str()
-                .unwrap_or("assistant")
-                .to_string();
+            let role = message["role"].as_str().unwrap_or("assistant").to_string();
             let content = message["content"].as_str().unwrap_or("").to_string();
 
-        let tool_calls = if message.get("tool_calls").is_some() {
-            let calls: Vec<ToolCall> = message["tool_calls"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|c| {
-                    let func = c.get("function")?;
-                    Some(ToolCall {
-                        id: c.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                        name: func["name"].as_str()?.to_string(),
-                        arguments: func["arguments"].clone(),
+            let tool_calls = if message.get("tool_calls").is_some() {
+                let calls: Vec<ToolCall> = message["tool_calls"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|c| {
+                        let func = c.get("function")?;
+                        Some(ToolCall {
+                            id: c.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            name: func["name"].as_str()?.to_string(),
+                            arguments: func["arguments"].clone(),
+                        })
                     })
-                })
-                .collect();
-            if calls.is_empty() {
-                None
+                    .collect();
+                if calls.is_empty() {
+                    None
+                } else {
+                    Some(calls)
+                }
             } else {
-                Some(calls)
-            }
-        } else {
-            None
-        };
+                None
+            };
 
             Ok(ChatResponse {
-                message: Message { role, content, tool_call_id: None },
+                message: Message {
+                    role,
+                    content,
+                    tool_call_id: None,
+                },
                 tool_calls,
                 done: chat_resp["done"].as_bool().unwrap_or(true),
             })
@@ -778,26 +785,27 @@ impl Agent {
 
     fn build_system_prompt(&self) -> String {
         let mut tools_list = Vec::new();
-        
+
         // Add regular tools
         for tool in self.tool_registry.list() {
             tools_list.push(format!("- {}: {}", tool.name, tool.description));
         }
-        
+
         // Add MCP tools
         if let Some(ref mcp) = self.mcp_registry {
             for tool in mcp.list() {
                 tools_list.push(format!("- {}: {}", tool.name, tool.description));
             }
         }
-        
+
         let tools_str = if tools_list.is_empty() {
             "No tools available".to_string()
         } else {
             tools_list.join("\n")
         };
-        
-        let mut prompt = format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
+
+        let mut prompt = format!(
+            r#"You are an autonomous agent that MUST use tools to complete tasks.
 
 AVAILABLE TOOLS:
 {}
@@ -808,14 +816,16 @@ STRICT RULES:
 3. NEVER just output content - you MUST save it to a file with 'write'
 4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
 
-When you finish a task, provide a summary of what was done."#, tools_str);
-        
+When you finish a task, provide a summary of what was done."#,
+            tools_str
+        );
+
         // Add extra system prompt (from AGENTS.md or CLI)
         if let Some(ref extra) = self.extra_system_prompt {
             prompt.push_str("\n\n");
             prompt.push_str(extra);
         }
-        
+
         prompt
     }
 
@@ -836,19 +846,23 @@ When you finish a task, provide a summary of what was done."#, tools_str);
         ];
 
         let mut tool_defs = self.tool_registry.list();
-        
+
         // Add MCP tools to the list
         if let Some(ref mcp) = self.mcp_registry {
-            let mcp_tools: Vec<ToolDefinition> = mcp.list().into_iter().map(|t| ToolDefinition {
-                name: t.name,
-                description: t.description,
-                parameters: t.input_schema,
-            }).collect();
+            let mcp_tools: Vec<ToolDefinition> = mcp
+                .list()
+                .into_iter()
+                .map(|t| ToolDefinition {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.input_schema,
+                })
+                .collect();
             info!("Adding {} MCP tools to available tools", mcp_tools.len());
             tool_defs.extend(mcp_tools);
             info!("MCP tools: {:?}", mcp.list_names());
         }
-        
+
         let mut tool_history: HashMap<String, usize> = HashMap::new();
 
         info!("Starting agent loop for task: {}", task);
@@ -856,33 +870,58 @@ When you finish a task, provide a summary of what was done."#, tools_str);
         debug!("Total messages at start: {}", messages.len());
 
         for iteration in 0..self.max_iterations {
-            info!("=== Iteration {}/{} ===", iteration + 1, self.max_iterations);
+            info!(
+                "=== Iteration {}/{} ===",
+                iteration + 1,
+                self.max_iterations
+            );
             debug!("Messages before LLM call: {}", messages.len());
-            
+
             // Log last few messages for debugging
             if iteration > 0 {
-                debug!("Last 3 messages roles: {:?}", messages.iter().rev().take(3).map(|m| &m.role).collect::<Vec<_>>());
+                debug!(
+                    "Last 3 messages roles: {:?}",
+                    messages
+                        .iter()
+                        .rev()
+                        .take(3)
+                        .map(|m| &m.role)
+                        .collect::<Vec<_>>()
+                );
             }
 
-            let response = self.llm.chat(messages.clone(), Some(tool_defs.clone())).await?;
-            
-        debug!("LLM response - has_tool_calls: {}, content_len: {}", 
-            response.tool_calls.is_some(), 
-            response.message.content.len());
-        
-        // Debug: log raw response if empty
-        if response.message.content.is_empty() && response.tool_calls.is_none() {
-            warn!("LLM returned empty response (no content, no tool_calls)! Message: {:?}", response.message);
-        }
+            let response = self
+                .llm
+                .chat(messages.clone(), Some(tool_defs.clone()))
+                .await?;
+
+            debug!(
+                "LLM response - has_tool_calls: {}, content_len: {}",
+                response.tool_calls.is_some(),
+                response.message.content.len()
+            );
+
+            // Debug: log raw response if empty
+            if response.message.content.is_empty() && response.tool_calls.is_none() {
+                warn!(
+                    "LLM returned empty response (no content, no tool_calls)! Message: {:?}",
+                    response.message
+                );
+            }
 
             if let Some(tool_calls) = response.tool_calls {
                 info!("LLM returned {} tool call(s)", tool_calls.len());
-                
+
                 // Execute tool calls ONE AT A TIME and ask LLM for next step after each
                 // This enables chaining - LLM sees result before deciding next action
                 for (i, call) in tool_calls.iter().enumerate() {
-                    info!("  -> Tool {}: {} args: {:?}", i+1, call.name, call.arguments);
-                    
+                    info!(
+                        "  -> Tool {}: {} args: {:?}",
+                        i + 1,
+                        call.name,
+                        call.arguments
+                    );
+
                     let call_key = format!("{}:{}", call.name, call.arguments);
                     let count = tool_history.entry(call_key.clone()).or_insert(0);
                     *count += 1;
@@ -905,25 +944,30 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                     // Check if it's a regular tool
                     if let Some(tool) = self.tool_registry.get(&call.name) {
                         info!("Executing tool: {}", call.name);
-                        
+
                         // Handle arguments - MiniMax sends them as a string, need to parse
                         let args = if let Some(s) = call.arguments.as_str() {
                             serde_json::from_str(s).unwrap_or(call.arguments.clone())
                         } else {
                             call.arguments.clone()
                         };
-                        
+
                         let result = tool.execute(args).await?;
-                        
-                        info!("Tool {} result: success={}, output_len={}", 
-                            call.name, result.success, result.output.len());
+
+                        info!(
+                            "Tool {} result: success={}, output_len={}",
+                            call.name,
+                            result.success,
+                            result.output.len()
+                        );
 
                         // If write tool succeeded, task is complete
                         if call.name == "write" && result.success {
                             info!("Write tool succeeded - task complete!");
                             return Ok(format!(
                                 "Task completed successfully! Saved content to: {}",
-                                call.arguments.get("path")
+                                call.arguments
+                                    .get("path")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("file")
                             ));
@@ -935,7 +979,7 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                             content: result_message,
                             tool_call_id: call.id.clone(),
                         });
-                        
+
                         // Ask LLM what to do next
                         messages.push(Message {
                             role: "system".to_string(),
@@ -948,10 +992,10 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                             ),
                             tool_call_id: None,
                         });
-                        
+
                         debug!("Asking LLM what to do next after tool: {}", call.name);
                         break; // Exit the for loop to ask LLM for next step
-                    } 
+                    }
                     // Check if it's an MCP tool (try both short name and prefixed name)
                     else if let Some(ref mcp) = self.mcp_registry {
                         // Try short name first, then try with MCP prefix
@@ -966,47 +1010,53 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                                 continue; // Not found
                             }
                         };
-                        
-                        info!("Executing MCP tool: {} (matched from {})", mcp_tool_name, call.name);
-                            
-                            let args = if let Some(s) = call.arguments.as_str() {
-                                serde_json::from_str(s).unwrap_or(call.arguments.clone())
-                            } else {
-                                call.arguments.clone()
-                            };
-                            
-                            match mcp.call_tool(&mcp_tool_name, args).await {
-                                Ok(result) => {
-                                    info!("MCP tool {} result: len={}", mcp_tool_name, result.len());
-                                    messages.push(Message {
-                                        role: "tool".to_string(),
-                                        content: result,
-                                        tool_call_id: call.id.clone(),
-                                    });
-                                    
-                                    messages.push(Message {
-                                        role: "system".to_string(),
-                                        content: format!(
-                                            "You just called MCP tool '{}' and got a result. \n\
+
+                        info!(
+                            "Executing MCP tool: {} (matched from {})",
+                            mcp_tool_name, call.name
+                        );
+
+                        let args = if let Some(s) = call.arguments.as_str() {
+                            serde_json::from_str(s).unwrap_or(call.arguments.clone())
+                        } else {
+                            call.arguments.clone()
+                        };
+
+                        match mcp.call_tool(&mcp_tool_name, args).await {
+                            Ok(result) => {
+                                info!("MCP tool {} result: len={}", mcp_tool_name, result.len());
+                                messages.push(Message {
+                                    role: "tool".to_string(),
+                                    content: result,
+                                    tool_call_id: call.id.clone(),
+                                });
+
+                                messages.push(Message {
+                                    role: "system".to_string(),
+                                    content: format!(
+                                        "You just called MCP tool '{}' and got a result. \n\
                                             Your task is: {}\n\
                                             What is the NEXT step?",
-                                            call.name, task
-                                        ),
-                                        tool_call_id: None,
-                                    });
-                                    
-                                    break;
-                                }
-                                Err(e) => {
-                                    error!("MCP tool {} failed: {}", mcp_tool_name, e);
-                                    messages.push(Message {
-                                        role: "tool".to_string(),
-                                        content: format!("ERROR: MCP tool '{}' failed: {}", mcp_tool_name, e),
-                                        tool_call_id: call.id.clone(),
-                                    });
-                                    break;
-                                }
+                                        call.name, task
+                                    ),
+                                    tool_call_id: None,
+                                });
+
+                                break;
                             }
+                            Err(e) => {
+                                error!("MCP tool {} failed: {}", mcp_tool_name, e);
+                                messages.push(Message {
+                                    role: "tool".to_string(),
+                                    content: format!(
+                                        "ERROR: MCP tool '{}' failed: {}",
+                                        mcp_tool_name, e
+                                    ),
+                                    tool_call_id: call.id.clone(),
+                                });
+                                break;
+                            }
+                        }
                     } else {
                         error!("Tool not found: {}", call.name);
                         messages.push(Message {
@@ -1020,8 +1070,11 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                 continue;
             } else {
                 let final_response = response.message.content.clone();
-                debug!("No tool calls, LLM responded directly. Response: {:?}", &final_response[..final_response.len().min(200)]);
-                
+                debug!(
+                    "No tool calls, LLM responded directly. Response: {:?}",
+                    &final_response[..final_response.len().min(200)]
+                );
+
                 if final_response.trim().is_empty() {
                     // Empty response - prompt the LLM to try again
                     info!("LLM returned empty response, prompting to continue...");
@@ -1032,21 +1085,21 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                     });
                     continue;
                 }
-                
+
                 // Check if this looks like a final answer (not asking for more tools)
                 let lower_response = final_response.to_lowercase();
-                let is_final = !lower_response.contains("tool") && 
-                               !lower_response.contains("call") && 
-                               !lower_response.contains("need to") &&
-                               !lower_response.contains("should i") &&
-                               !lower_response.contains("would you");
-                
+                let is_final = !lower_response.contains("tool")
+                    && !lower_response.contains("call")
+                    && !lower_response.contains("need to")
+                    && !lower_response.contains("should i")
+                    && !lower_response.contains("would you");
+
                 if is_final || lower_response.len() > 50 {
                     // This looks like a final answer - return it
                     info!("Detected final answer from LLM");
                     return Ok(final_response);
                 }
-                
+
                 // LLM is still trying to use tools or asking questions
                 // Try one more time with a stronger prompt
                 info!("LLM returned text but no tool calls. Prompting to use tools...");
@@ -1068,7 +1121,10 @@ When you finish a task, provide a summary of what was done."#, tools_str);
     fn format_tool_result(tool_name: &str, result: &skill_tools::ToolResult) -> String {
         if result.success {
             if result.output.is_empty() {
-                format!("Tool '{}' completed successfully but produced no output.", tool_name)
+                format!(
+                    "Tool '{}' completed successfully but produced no output.",
+                    tool_name
+                )
             } else {
                 format!("Tool '{}' succeeded:\n{}", tool_name, result.output)
             }
@@ -1130,26 +1186,27 @@ impl StreamingAgent {
 
     fn build_system_prompt(&self) -> String {
         let mut tools_list = Vec::new();
-        
+
         // Add regular tools
         for tool in self.tool_registry.list() {
             tools_list.push(format!("- {}: {}", tool.name, tool.description));
         }
-        
+
         // Add MCP tools
         if let Some(ref mcp) = self.mcp_registry {
             for tool in mcp.list() {
                 tools_list.push(format!("- {}: {}", tool.name, tool.description));
             }
         }
-        
+
         let tools_str = if tools_list.is_empty() {
             "No tools available".to_string()
         } else {
             tools_list.join("\n")
         };
-        
-        let mut prompt = format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
+
+        let mut prompt = format!(
+            r#"You are an autonomous agent that MUST use tools to complete tasks.
 
 AVAILABLE TOOLS:
 {}
@@ -1160,14 +1217,16 @@ STRICT RULES:
 3. NEVER just output content - you MUST save it to a file with 'write'
 4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
 
-When you finish a task, provide a summary of what was done."#, tools_str);
-        
+When you finish a task, provide a summary of what was done."#,
+            tools_str
+        );
+
         // Add extra system prompt (from AGENTS.md or CLI)
         if let Some(ref extra) = self.extra_system_prompt {
             prompt.push_str("\n\n");
             prompt.push_str(extra);
         }
-        
+
         prompt
     }
 
@@ -1191,28 +1250,41 @@ When you finish a task, provide a summary of what was done."#, tools_str);
         ];
 
         let mut tool_defs = self.tool_registry.list();
-        
+
         // Add MCP tools to the list
         if let Some(ref mcp) = self.mcp_registry {
-            let mcp_tools: Vec<ToolDefinition> = mcp.list().into_iter().map(|t| ToolDefinition {
-                name: t.name,
-                description: t.description,
-                parameters: t.input_schema,
-            }).collect();
+            let mcp_tools: Vec<ToolDefinition> = mcp
+                .list()
+                .into_iter()
+                .map(|t| ToolDefinition {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.input_schema,
+                })
+                .collect();
             println!("{} Adding {} MCP tools", Self::icon("mcp"), mcp_tools.len());
             tool_defs.extend(mcp_tools);
             println!("{} MCP tools: {:?}", Self::icon("mcp"), mcp.list_names());
         }
-        
+
         let mut tool_history: HashMap<String, usize> = HashMap::new();
 
-        println!("{} Tools: {:?}\n", Self::icon("tools"), self.tool_registry.names());
+        println!(
+            "{} Tools: {:?}\n",
+            Self::icon("tools"),
+            self.tool_registry.names()
+        );
 
         for iteration in 0..self.max_iterations {
-            println!("{}", Self::iteration_header(iteration + 1, self.max_iterations));
-            
-            let response_stream = self.llm.chat_streaming(messages.clone(), Some(tool_defs.clone()));
-            
+            println!(
+                "{}",
+                Self::iteration_header(iteration + 1, self.max_iterations)
+            );
+
+            let response_stream = self
+                .llm
+                .chat_streaming(messages.clone(), Some(tool_defs.clone()));
+
             let mut accumulated_content = String::new();
             let mut final_tool_calls: Option<Vec<ToolCall>> = None;
             let mut is_done = false;
@@ -1237,37 +1309,47 @@ When you finish a task, provide a summary of what was done."#, tools_str);
 
                 if !chunk.content.is_empty() {
                     accumulated_content.push_str(&chunk.content);
-                    info!("[STREAM] Accumulated content now: {} chars", accumulated_content.len());
+                    info!(
+                        "[STREAM] Accumulated content now: {} chars",
+                        accumulated_content.len()
+                    );
                     if self.show_thinking {
                         print!("{}", Self::thinking(&chunk.content));
                     }
                 }
 
                 if let Some(tool_calls) = chunk.tool_calls {
-                    info!("[STREAM] Got tool calls in chunk #{}: {:?}", chunk_count, tool_calls);
-                    
+                    info!(
+                        "[STREAM] Got tool calls in chunk #{}: {:?}",
+                        chunk_count, tool_calls
+                    );
+
                     // FIX: Accumulate tool call arguments across chunks
                     // If we already have tool_calls, we need to merge them (append arguments)
                     // Note: MiniMax may send partial tool_calls without function name in subsequent chunks
                     match &final_tool_calls {
                         Some(existing) => {
                             let mut combined = existing.clone();
-                            
+
                             // Check if new tool_calls have function names (full) or just partial args
-                            let new_has_names: Vec<bool> = tool_calls.iter()
+                            let new_has_names: Vec<bool> = tool_calls
+                                .iter()
                                 .map(|c| c.name.is_empty() == false)
                                 .collect();
-                            
+
                             // If new chunks have partial args (no name), append to existing
                             // Otherwise, add as new tool calls
                             for (i, new_call) in tool_calls.iter().enumerate() {
                                 if i < combined.len() && !new_has_names[i] {
                                     // Merge: append arguments strings to existing
-                                    if let (Some(existing_args), Some(new_args)) = 
-                                        (combined[i].arguments.as_str(), new_call.arguments.as_str()) {
+                                    if let (Some(existing_args), Some(new_args)) = (
+                                        combined[i].arguments.as_str(),
+                                        new_call.arguments.as_str(),
+                                    ) {
                                         let merged_args = format!("{}{}", existing_args, new_args);
                                         info!("[STREAM] Merged partial args: {:?}", merged_args);
-                                        combined[i].arguments = serde_json::Value::String(merged_args);
+                                        combined[i].arguments =
+                                            serde_json::Value::String(merged_args);
                                     }
                                 } else {
                                     combined.push(new_call.clone());
@@ -1293,27 +1375,39 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                 chunk_count, accumulated_content.len(), final_tool_calls, is_done);
 
             if !accumulated_content.is_empty() {
-                println!("{} {}", Self::icon("response"), Self::response(&accumulated_content));
+                println!(
+                    "{} {}",
+                    Self::icon("response"),
+                    Self::response(&accumulated_content)
+                );
             }
 
             if let Some(tool_calls) = final_tool_calls {
                 if !tool_calls.is_empty() {
                     println!("{} {} tool call(s)", Self::icon("tools"), tool_calls.len());
-                    
+
                     for (i, call) in tool_calls.iter().enumerate() {
-                        println!("{} Tool {}: {} {}", 
-                            Self::indent(2), 
-                            i + 1, 
+                        println!(
+                            "{} Tool {}: {} {}",
+                            Self::indent(2),
+                            i + 1,
                             Self::tool_name(call.name.as_str()),
                             Self::tool_args(&call.arguments)
                         );
-                        
+
                         let call_key = format!("{}:{}", call.name, call.arguments);
                         let count = tool_history.entry(call_key.clone()).or_insert(0);
                         *count += 1;
 
                         if *count > 2 {
-                            println!("{} {}", Self::icon("warn"), Self::warn(&format!("Doom loop detected: {} called {} times", call.name, count)));
+                            println!(
+                                "{} {}",
+                                Self::icon("warn"),
+                                Self::warn(&format!(
+                                    "Doom loop detected: {} called {} times",
+                                    call.name, count
+                                ))
+                            );
                             messages.push(Message {
                                 role: "tool".to_string(),
                                 content: format!(
@@ -1327,27 +1421,47 @@ When you finish a task, provide a summary of what was done."#, tools_str);
 
                         // Check if it's a regular tool
                         if let Some(tool) = self.tool_registry.get(&call.name) {
-                            println!("{} Executing: {}", Self::icon("exec"), Self::exec(call.name.as_str()));
-                            
+                            println!(
+                                "{} Executing: {}",
+                                Self::icon("exec"),
+                                Self::exec(call.name.as_str())
+                            );
+
                             let args = if let Some(s) = call.arguments.as_str() {
                                 serde_json::from_str(s).unwrap_or(call.arguments.clone())
                             } else {
                                 call.arguments.clone()
                             };
-                            
+
                             let result = tool.execute(args).await?;
-                            
+
                             if result.success {
-                                println!("{} {}", Self::icon("success"), Self::success(&format!("Tool '{}' executed successfully", call.name)));
+                                println!(
+                                    "{} {}",
+                                    Self::icon("success"),
+                                    Self::success(&format!(
+                                        "Tool '{}' executed successfully",
+                                        call.name
+                                    ))
+                                );
                             } else {
-                                println!("{} {}", Self::icon("error"), Self::error(&format!("Tool '{}' failed: {}", call.name, result.error.as_deref().unwrap_or("Unknown"))));
+                                println!(
+                                    "{} {}",
+                                    Self::icon("error"),
+                                    Self::error(&format!(
+                                        "Tool '{}' failed: {}",
+                                        call.name,
+                                        result.error.as_deref().unwrap_or("Unknown")
+                                    ))
+                                );
                             }
 
                             if call.name == "write" && result.success {
                                 println!("\n{}", Self::success_header("TASK COMPLETED"));
                                 return Ok(format!(
                                     "Task completed successfully! Saved content to: {}",
-                                    call.arguments.get("path")
+                                    call.arguments
+                                        .get("path")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("file")
                                 ));
@@ -1359,7 +1473,7 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                                 content: result_message,
                                 tool_call_id: call.id.clone(),
                             });
-                            
+
                             messages.push(Message {
                                 role: "system".to_string(),
                                 content: format!(
@@ -1371,7 +1485,7 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                                 ),
                                 tool_call_id: None,
                             });
-                            
+
                             break;
                         }
                         // Check if it's an MCP tool (try both short name and prefixed name)
@@ -1385,7 +1499,11 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                                 if mcp.get(&prefixed).is_some() {
                                     prefixed
                                 } else {
-                                    println!("{} Tool not found: {}", Self::icon("error"), call.name);
+                                    println!(
+                                        "{} Tool not found: {}",
+                                        Self::icon("error"),
+                                        call.name
+                                    );
                                     messages.push(Message {
                                         role: "tool".to_string(),
                                         content: format!("ERROR: Tool '{}' not found.", call.name),
@@ -1394,47 +1512,69 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                                     break;
                                 }
                             };
-                            
-                            println!("{} Executing MCP tool: {} (matched from {})", Self::icon("exec"), Self::exec(mcp_tool_name.as_str()), call.name);
-                                
-                                let args = if let Some(s) = call.arguments.as_str() {
-                                    serde_json::from_str(s).unwrap_or(call.arguments.clone())
-                                } else {
-                                    call.arguments.clone()
-                                };
-                                
-                                match mcp.call_tool(&mcp_tool_name, args).await {
-                                    Ok(result) => {
-                                        println!("{} {}", Self::icon("success"), Self::success(&format!("MCP tool '{}' executed", mcp_tool_name)));
-                                        messages.push(Message {
-                                            role: "tool".to_string(),
-                                            content: result,
-                                            tool_call_id: call.id.clone(),
-                                        });
-                                        
-                                        messages.push(Message {
-                                            role: "system".to_string(),
-                                            content: format!(
-                                                "You just called MCP tool '{}' and got a result. \n\
+
+                            println!(
+                                "{} Executing MCP tool: {} (matched from {})",
+                                Self::icon("exec"),
+                                Self::exec(mcp_tool_name.as_str()),
+                                call.name
+                            );
+
+                            let args = if let Some(s) = call.arguments.as_str() {
+                                serde_json::from_str(s).unwrap_or(call.arguments.clone())
+                            } else {
+                                call.arguments.clone()
+                            };
+
+                            match mcp.call_tool(&mcp_tool_name, args).await {
+                                Ok(result) => {
+                                    println!(
+                                        "{} {}",
+                                        Self::icon("success"),
+                                        Self::success(&format!(
+                                            "MCP tool '{}' executed",
+                                            mcp_tool_name
+                                        ))
+                                    );
+                                    messages.push(Message {
+                                        role: "tool".to_string(),
+                                        content: result,
+                                        tool_call_id: call.id.clone(),
+                                    });
+
+                                    messages.push(Message {
+                                        role: "system".to_string(),
+                                        content: format!(
+                                            "You just called MCP tool '{}' and got a result. \n\
                                                 Your task is: {}\n\
                                                 What is the NEXT step?",
-                                                mcp_tool_name, task
-                                            ),
-                                            tool_call_id: None,
-                                        });
-                                        
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        println!("{} {}", Self::icon("error"), Self::error(&format!("MCP tool '{}' failed: {}", mcp_tool_name, e)));
-                                        messages.push(Message {
-                                            role: "tool".to_string(),
-                                            content: format!("ERROR: MCP tool '{}' failed: {}", mcp_tool_name, e),
-                                            tool_call_id: call.id.clone(),
-                                        });
-                                        break;
-                                    }
+                                            mcp_tool_name, task
+                                        ),
+                                        tool_call_id: None,
+                                    });
+
+                                    break;
                                 }
+                                Err(e) => {
+                                    println!(
+                                        "{} {}",
+                                        Self::icon("error"),
+                                        Self::error(&format!(
+                                            "MCP tool '{}' failed: {}",
+                                            mcp_tool_name, e
+                                        ))
+                                    );
+                                    messages.push(Message {
+                                        role: "tool".to_string(),
+                                        content: format!(
+                                            "ERROR: MCP tool '{}' failed: {}",
+                                            mcp_tool_name, e
+                                        ),
+                                        tool_call_id: call.id.clone(),
+                                    });
+                                    break;
+                                }
+                            }
                         }
                     }
 
@@ -1443,7 +1583,11 @@ When you finish a task, provide a summary of what was done."#, tools_str);
             }
 
             if accumulated_content.trim().is_empty() && !is_done {
-                println!("{} {}", Self::icon("warn"), Self::warn("LLM returned empty response"));
+                println!(
+                    "{} {}",
+                    Self::icon("warn"),
+                    Self::warn("LLM returned empty response")
+                );
                 messages.push(Message {
                     role: "system".to_string(),
                     content: "You MUST use a tool to complete the task. If you got content from a skill, use the 'write' tool to save it. What tool will you call next?".to_string(),
@@ -1451,19 +1595,19 @@ When you finish a task, provide a summary of what was done."#, tools_str);
                 });
                 continue;
             }
-            
+
             let lower_response = accumulated_content.to_lowercase();
-            let is_final = !lower_response.contains("tool") && 
-                           !lower_response.contains("call") && 
-                           !lower_response.contains("need to") &&
-                           !lower_response.contains("should i") &&
-                           !lower_response.contains("would you");
-            
+            let is_final = !lower_response.contains("tool")
+                && !lower_response.contains("call")
+                && !lower_response.contains("need to")
+                && !lower_response.contains("should i")
+                && !lower_response.contains("would you");
+
             if is_final || accumulated_content.len() > 50 {
                 println!("\n{}", Self::final_header("FINAL ANSWER"));
                 return Ok(accumulated_content);
             }
-            
+
             println!("{} Prompting to use tools...", Self::icon("hint"));
             messages.push(Message {
                 role: "system".to_string(),

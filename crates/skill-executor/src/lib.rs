@@ -6,8 +6,8 @@ use std::time::Instant;
 use tokio::process::Command;
 use tracing::{debug, info};
 
-pub mod error;
 pub mod context;
+pub mod error;
 
 pub use context::ExecutionContext;
 

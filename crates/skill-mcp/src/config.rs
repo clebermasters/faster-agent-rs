@@ -9,7 +9,7 @@ use crate::error::{McpError, Result};
 pub struct McpConfig {
     #[serde(rename = "mcpServers", default)]
     pub servers: HashMap<String, McpServerConfig>,
-    
+
     #[serde(default)]
     pub imports: Vec<String>,
 }
@@ -24,10 +24,10 @@ pub enum McpServerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StdioServerConfig {
     pub command: String,
-    
+
     #[serde(default)]
     pub args: Vec<String>,
-    
+
     #[serde(default)]
     pub env: HashMap<String, String>,
 }
@@ -35,7 +35,7 @@ pub struct StdioServerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SseServerConfig {
     pub url: String,
-    
+
     #[serde(default)]
     pub headers: HashMap<String, String>,
 }
@@ -48,14 +48,14 @@ impl McpConfig {
         }
 
         info!("Loading MCP config from: {:?}", path);
-        
+
         let content = tokio::fs::read_to_string(path).await?;
-        
+
         let config: McpConfig = serde_json::from_str(&content)
             .map_err(|e| McpError::Parse(format!("Failed to parse mcp.json: {}", e)))?;
-        
+
         debug!("Loaded {} MCP servers", config.servers.len());
-        
+
         Ok(config)
     }
 
@@ -96,7 +96,7 @@ mod tests {
 
         let config: McpConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.servers.len(), 1);
-        
+
         let server = config.servers.get("MiniMax").unwrap();
         match server {
             McpServerConfig::Stdio(stdio) => {

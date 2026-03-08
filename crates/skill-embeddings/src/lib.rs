@@ -50,7 +50,12 @@ impl EmbeddingService {
         }
     }
 
-    async fn embed_ollama(&self, url: &str, model: &str, text: &str) -> Result<Vec<f32>, EmbeddingError> {
+    async fn embed_ollama(
+        &self,
+        url: &str,
+        model: &str,
+        text: &str,
+    ) -> Result<Vec<f32>, EmbeddingError> {
         let client = reqwest::Client::new();
 
         let request = serde_json::json!({
@@ -96,10 +101,7 @@ impl EmbeddingService {
         let conn = Connection::open(&self.db_path)
             .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
 
-        let embedding_bytes: Vec<u8> = embedding
-            .iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect();
+        let embedding_bytes: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -128,7 +130,10 @@ impl EmbeddingService {
             .query(params![skill_id])
             .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
 
-        if let Some(row) = rows.next().map_err(|e| EmbeddingError::DatabaseError(e.to_string()))? {
+        if let Some(row) = rows
+            .next()
+            .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?
+        {
             let embedding_bytes: Vec<u8> = row
                 .get(0)
                 .map_err(|e| EmbeddingError::DatabaseError(e.to_string()))?;
