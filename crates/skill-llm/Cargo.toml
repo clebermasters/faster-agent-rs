@@ -15,3 +15,6 @@ tracing = "0.1"
 
 [dependencies.skill-tools]
 path = "../skill-tools"
+
+[dependencies.skill-mcp]
+path = "../skill-mcp"

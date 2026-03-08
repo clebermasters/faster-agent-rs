@@ -4,10 +4,12 @@ use skill_discovery::SkillDiscoveryEngine;
 use skill_embeddings::EmbeddingService;
 use skill_executor::{ExecutionContext, SkillExecutor};
 use skill_llm::{Agent, MiniMaxClient, OllamaClient, StreamingAgent};
+use skill_mcp::McpRegistry;
 use skill_registry::SkillRegistry;
 use skill_tools::{BashTool, ReadTool, SkillTool, ToolBox, ToolRegistry, WriteTool};
 use std::path::PathBuf;
-use tracing::{info, Level};
+use std::time::Duration;
+use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
@@ -49,6 +51,12 @@ struct Cli {
 
     #[arg(long, default_value = "false")]
     streaming: bool,
+
+    #[arg(long, default_value = "./mcp.json")]
+    mcp_config: PathBuf,
+
+    #[arg(long, default_value = "30")]
+    mcp_timeout: u64,
 }
 
 #[derive(Subcommand)]
@@ -208,6 +216,25 @@ async fn main() -> anyhow::Result<()> {
             engine.registry_mut().load().await?;
             engine.index_all().await?;
 
+            // Load MCP servers (lazy - will connect on first use)
+            let mut mcp_registry = McpRegistry::new(Duration::from_secs(cli.mcp_timeout));
+            if cli.mcp_config.exists() {
+                match mcp_registry.load_from_file(&cli.mcp_config).await {
+                    Ok(_) => {
+                        info!("Loaded MCP registry with {} tools from {} servers", 
+                            mcp_registry.tool_count(), mcp_registry.server_count());
+                        if !mcp_registry.list_names().is_empty() {
+                            info!("MCP tools available: {:?}", mcp_registry.list_names());
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to load MCP config: {}", e);
+                    }
+                }
+            } else {
+                info!("No MCP config found at {:?}", cli.mcp_config);
+            }
+
             let mut tools = ToolRegistry::new();
             tools.register(ToolBox::Bash(BashTool::new()));
             tools.register(ToolBox::Read(ReadTool::new(config.skills_dir.clone().to_string_lossy().to_string())));
@@ -236,8 +263,14 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             
+            // Convert mcp_registry to Arc for sharing
+            let mcp_registry = std::sync::Arc::new(mcp_registry);
+            
             if cli.streaming {
-                let agent = StreamingAgent::new(llm).with_tools(tools).with_max_iterations(10);
+                let agent = StreamingAgent::new(llm)
+                    .with_tools(tools)
+                    .with_mcp_registry(mcp_registry.clone())
+                    .with_max_iterations(10);
 
                 println!("=== Skill Agent (Streaming Mode) ===");
                 println!("Type 'quit' to exit\n");
@@ -266,7 +299,10 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             } else {
-                let agent = Agent::new(llm).with_tools(tools).with_max_iterations(10);
+                let agent = Agent::new(llm)
+                    .with_tools(tools)
+                    .with_mcp_registry(mcp_registry.clone())
+                    .with_max_iterations(10);
 
                 println!("=== Skill Agent ===");
                 println!("Type 'quit' to exit\n");

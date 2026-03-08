@@ -1,0 +1,4 @@
+  The available mcp minimax-coding-plan-mcp has a feature to make research in the internet and fetch the containt. But, the agent never used the MCP tool. I run        
+  the following command line: "cargo run -- --streaming --llm-provider minimax --llm-model MiniMax-M2.5 agent "let's do deeper research on the internet, to find information about the MiniMax M3 to predict when it will be available"" the agent did the task, but execute several curl commands instead. Let's add several logs, and try to                
+  understand that. Make several tests later, after you have done the fix, don't stop in the first test that works, extress your tests, if keep failing, do some         
+  web research, review the codebase, see the opencode source code, to extract wisdom how it handle that.                                                                

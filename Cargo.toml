@@ -7,6 +7,7 @@ members = [
     "crates/skill-executor",
     "crates/skill-tools",
     "crates/skill-llm",
+    "crates/skill-mcp",
     "crates/skill-agent",
 ]
 resolver = "2"
@@ -29,6 +30,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { version = "0.12", features = ["json"] }
 async-trait = "0.1"
 anyhow = "1"
+
+# MCP SDK
+rust-mcp-sdk = "0.8"
+rust-mcp-transport = "0.8"
 
 # Skill parsing
 agent-skills = "0.2"

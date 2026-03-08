@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "MiniMax": {
+      "command": "uvx",
+      "args": ["minimax-coding-plan-mcp"],
+      "env": {
+        "MINIMAX_API_KEY": "sk-cp-mJmYmRwMwPlGDP83K7qY_1B1QVC7w_pZB9R82b4aW1MkzCCAuHNRWr4fFd8dboNG36O96gcyh56C2hlh_qFdqQrmGhB01vTwVp-FFytvTwMg2k-Qi0_yvtM",
+        "MINIMAX_MCP_BASE_PATH": "Local output directory path, ensure the path exists and is writable",
+        "MINIMAX_API_HOST": "https://api.minimax.io",
+        "MINIMAX_API_RESOURCE_MODE": "Optional. Resource delivery method: url or local, default url"
+      }
+    }
+  },
+  "imports": []
+}

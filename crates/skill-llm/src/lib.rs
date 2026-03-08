@@ -738,6 +738,7 @@ impl LLMClient for OllamaClient {
 pub struct Agent {
     llm: Box<dyn LLMClient>,
     tool_registry: ToolRegistry,
+    mcp_registry: Option<std::sync::Arc<skill_mcp::McpRegistry>>,
     max_iterations: usize,
     tool_call_history: HashMap<String, usize>,
 }
@@ -747,6 +748,7 @@ impl Agent {
         Self {
             llm,
             tool_registry: ToolRegistry::new(),
+            mcp_registry: None,
             max_iterations: 10,
             tool_call_history: HashMap::new(),
         }
@@ -754,6 +756,11 @@ impl Agent {
 
     pub fn with_tools(mut self, tools: ToolRegistry) -> Self {
         self.tool_registry = tools;
+        self
+    }
+
+    pub fn with_mcp_registry(mut self, registry: std::sync::Arc<skill_mcp::McpRegistry>) -> Self {
+        self.mcp_registry = Some(registry);
         self
     }
 
@@ -800,7 +807,20 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
             },
         ];
 
-        let tool_defs = self.tool_registry.list();
+        let mut tool_defs = self.tool_registry.list();
+        
+        // Add MCP tools to the list
+        if let Some(ref mcp) = self.mcp_registry {
+            let mcp_tools: Vec<ToolDefinition> = mcp.list().into_iter().map(|t| ToolDefinition {
+                name: t.name,
+                description: t.description,
+                parameters: t.input_schema,
+            }).collect();
+            info!("Adding {} MCP tools to available tools", mcp_tools.len());
+            tool_defs.extend(mcp_tools);
+            info!("MCP tools: {:?}", mcp.list_names());
+        }
+        
         let mut tool_history: HashMap<String, usize> = HashMap::new();
 
         info!("Starting agent loop for task: {}", task);
@@ -854,6 +874,7 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
                         continue;
                     }
 
+                    // Check if it's a regular tool
                     if let Some(tool) = self.tool_registry.get(&call.name) {
                         info!("Executing tool: {}", call.name);
                         
@@ -887,7 +908,7 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
                             tool_call_id: call.id.clone(),
                         });
                         
-                        // CRITICAL: Explicitly ask LLM what to do next
+                        // Ask LLM what to do next
                         messages.push(Message {
                             role: "system".to_string(),
                             content: format!(
@@ -902,6 +923,62 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
                         
                         debug!("Asking LLM what to do next after tool: {}", call.name);
                         break; // Exit the for loop to ask LLM for next step
+                    } 
+                    // Check if it's an MCP tool (try both short name and prefixed name)
+                    else if let Some(ref mcp) = self.mcp_registry {
+                        // Try short name first, then try with MCP prefix
+                        let mcp_tool_name = if mcp.get(&call.name).is_some() {
+                            call.name.clone()
+                        } else {
+                            // Try common MCP prefixes
+                            let prefixed = format!("MiniMax_{}", call.name);
+                            if mcp.get(&prefixed).is_some() {
+                                prefixed
+                            } else {
+                                continue; // Not found
+                            }
+                        };
+                        
+                        info!("Executing MCP tool: {} (matched from {})", mcp_tool_name, call.name);
+                            
+                            let args = if let Some(s) = call.arguments.as_str() {
+                                serde_json::from_str(s).unwrap_or(call.arguments.clone())
+                            } else {
+                                call.arguments.clone()
+                            };
+                            
+                            match mcp.call_tool(&mcp_tool_name, args).await {
+                                Ok(result) => {
+                                    info!("MCP tool {} result: len={}", mcp_tool_name, result.len());
+                                    messages.push(Message {
+                                        role: "tool".to_string(),
+                                        content: result,
+                                        tool_call_id: call.id.clone(),
+                                    });
+                                    
+                                    messages.push(Message {
+                                        role: "system".to_string(),
+                                        content: format!(
+                                            "You just called MCP tool '{}' and got a result. \n\
+                                            Your task is: {}\n\
+                                            What is the NEXT step?",
+                                            call.name, task
+                                        ),
+                                        tool_call_id: None,
+                                    });
+                                    
+                                    break;
+                                }
+                                Err(e) => {
+                                    error!("MCP tool {} failed: {}", mcp_tool_name, e);
+                                    messages.push(Message {
+                                        role: "tool".to_string(),
+                                        content: format!("ERROR: MCP tool '{}' failed: {}", mcp_tool_name, e),
+                                        tool_call_id: call.id.clone(),
+                                    });
+                                    break;
+                                }
+                            }
                     } else {
                         error!("Tool not found: {}", call.name);
                         messages.push(Message {
@@ -980,6 +1057,7 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
 pub struct StreamingAgent {
     llm: Box<dyn LLMClient>,
     tool_registry: ToolRegistry,
+    mcp_registry: Option<std::sync::Arc<skill_mcp::McpRegistry>>,
     max_iterations: usize,
     show_thinking: bool,
 }
@@ -989,6 +1067,7 @@ impl StreamingAgent {
         Self {
             llm,
             tool_registry: ToolRegistry::new(),
+            mcp_registry: None,
             max_iterations: 10,
             show_thinking: true,
         }
@@ -996,6 +1075,11 @@ impl StreamingAgent {
 
     pub fn with_tools(mut self, tools: ToolRegistry) -> Self {
         self.tool_registry = tools;
+        self
+    }
+
+    pub fn with_mcp_registry(mut self, registry: std::sync::Arc<skill_mcp::McpRegistry>) -> Self {
+        self.mcp_registry = Some(registry);
         self
     }
 
@@ -1050,7 +1134,20 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
             },
         ];
 
-        let tool_defs = self.tool_registry.list();
+        let mut tool_defs = self.tool_registry.list();
+        
+        // Add MCP tools to the list
+        if let Some(ref mcp) = self.mcp_registry {
+            let mcp_tools: Vec<ToolDefinition> = mcp.list().into_iter().map(|t| ToolDefinition {
+                name: t.name,
+                description: t.description,
+                parameters: t.input_schema,
+            }).collect();
+            println!("{} Adding {} MCP tools", Self::icon("mcp"), mcp_tools.len());
+            tool_defs.extend(mcp_tools);
+            println!("{} MCP tools: {:?}", Self::icon("mcp"), mcp.list_names());
+        }
+        
         let mut tool_history: HashMap<String, usize> = HashMap::new();
 
         println!("{} Tools: {:?}\n", Self::icon("tools"), self.tool_registry.names());
@@ -1172,6 +1269,7 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
                             continue;
                         }
 
+                        // Check if it's a regular tool
                         if let Some(tool) = self.tool_registry.get(&call.name) {
                             println!("{} Executing: {}", Self::icon("exec"), Self::exec(call.name.as_str()));
                             
@@ -1219,13 +1317,68 @@ The 'write' tool is REQUIRED to save any content. It is your job to save things!
                             });
                             
                             break;
-                        } else {
-                            println!("{} Tool not found: {}", Self::icon("error"), call.name);
-                            messages.push(Message {
-                                role: "tool".to_string(),
-                                content: format!("ERROR: Tool '{}' not found.", call.name),
-                                tool_call_id: None,
-                            });
+                        }
+                        // Check if it's an MCP tool (try both short name and prefixed name)
+                        else if let Some(ref mcp) = self.mcp_registry {
+                            // Try short name first, then try with MCP prefix
+                            let mcp_tool_name = if mcp.get(&call.name).is_some() {
+                                call.name.clone()
+                            } else {
+                                // Try common MCP prefixes
+                                let prefixed = format!("MiniMax_{}", call.name);
+                                if mcp.get(&prefixed).is_some() {
+                                    prefixed
+                                } else {
+                                    println!("{} Tool not found: {}", Self::icon("error"), call.name);
+                                    messages.push(Message {
+                                        role: "tool".to_string(),
+                                        content: format!("ERROR: Tool '{}' not found.", call.name),
+                                        tool_call_id: None,
+                                    });
+                                    break;
+                                }
+                            };
+                            
+                            println!("{} Executing MCP tool: {} (matched from {})", Self::icon("exec"), Self::exec(mcp_tool_name.as_str()), call.name);
+                                
+                                let args = if let Some(s) = call.arguments.as_str() {
+                                    serde_json::from_str(s).unwrap_or(call.arguments.clone())
+                                } else {
+                                    call.arguments.clone()
+                                };
+                                
+                                match mcp.call_tool(&mcp_tool_name, args).await {
+                                    Ok(result) => {
+                                        println!("{} {}", Self::icon("success"), Self::success(&format!("MCP tool '{}' executed", mcp_tool_name)));
+                                        messages.push(Message {
+                                            role: "tool".to_string(),
+                                            content: result,
+                                            tool_call_id: call.id.clone(),
+                                        });
+                                        
+                                        messages.push(Message {
+                                            role: "system".to_string(),
+                                            content: format!(
+                                                "You just called MCP tool '{}' and got a result. \n\
+                                                Your task is: {}\n\
+                                                What is the NEXT step?",
+                                                mcp_tool_name, task
+                                            ),
+                                            tool_call_id: None,
+                                        });
+                                        
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        println!("{} {}", Self::icon("error"), Self::error(&format!("MCP tool '{}' failed: {}", mcp_tool_name, e)));
+                                        messages.push(Message {
+                                            role: "tool".to_string(),
+                                            content: format!("ERROR: MCP tool '{}' failed: {}", mcp_tool_name, e),
+                                            tool_call_id: call.id.clone(),
+                                        });
+                                        break;
+                                    }
+                                }
                         }
                     }
 
