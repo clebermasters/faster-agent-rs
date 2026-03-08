@@ -16,6 +16,7 @@ use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
 #[command(name = "skill-agent")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Autonomous skill discovery agent", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -27,16 +28,16 @@ struct Cli {
     #[arg(long, default_value = "ollama")]
     provider: String,
 
-    #[arg(long, default_value = "http://localhost:11434")]
+    #[arg(long, env = "OLLAMA_URL", default_value = "http://localhost:11434")]
     ollama_url: String,
 
-    #[arg(long, default_value = "nomic-embed-text")]
+    #[arg(long, env = "EMBEDDING_MODEL", default_value = "nomic-embed-text")]
     ollama_model: String,
 
-    #[arg(long, default_value = "qwen3-coder-next:cloud")]
+    #[arg(long, env = "DEFAULT_MODEL", default_value = "MiniMax-Text-01")]
     llm_model: String,
 
-    #[arg(long, default_value = "ollama")]
+    #[arg(long, env = "LLM_PROVIDER", default_value = "minimax")]
     llm_provider: String,
 
     #[arg(long)]
@@ -155,14 +156,18 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Index => {
             info!("Indexing skills from {:?}", config.skills_dir);
-            
+
             engine.registry_mut().load().await?;
             engine.index_all().await?;
-            
+
             info!("Indexed {} skills", engine.registry().count());
         }
 
-        Commands::Discover { task, limit, threshold } => {
+        Commands::Discover {
+            task,
+            limit,
+            threshold,
+        } => {
             engine.registry_mut().load().await?;
             engine.index_all().await?;
 
@@ -177,7 +182,12 @@ async fn main() -> anyhow::Result<()> {
 
             println!("\n=== Discovered Skills ===\n");
             for (i, discovered) in results.iter().enumerate() {
-                println!("{}. {} (score: {:.2})", i + 1, discovered.skill.name, discovered.score);
+                println!(
+                    "{}. {} (score: {:.2})",
+                    i + 1,
+                    discovered.skill.name,
+                    discovered.score
+                );
                 println!("   {}", discovered.skill.description);
                 println!();
             }
@@ -195,7 +205,9 @@ async fn main() -> anyhow::Result<()> {
             let executor = SkillExecutor::new(config.skills_dir);
             let context = ExecutionContext::default();
 
-            let result = executor.execute_skill(&skill, input.as_deref(), &context).await?;
+            let result = executor
+                .execute_skill(&skill, input.as_deref(), &context)
+                .await?;
 
             if result.success {
                 println!("{}", result.output);
@@ -208,7 +220,7 @@ async fn main() -> anyhow::Result<()> {
             engine.registry_mut().load().await?;
 
             let skills = engine.registry().get_all();
-            
+
             println!("\n=== Available Skills ({}) ===\n", skills.len());
             for skill in skills {
                 println!("- {}: {}", skill.id, skill.name);
@@ -231,8 +243,11 @@ async fn main() -> anyhow::Result<()> {
             if cli.mcp_config.exists() {
                 match mcp_registry.load_from_file(&cli.mcp_config).await {
                     Ok(_) => {
-                        info!("Loaded MCP registry with {} tools from {} servers", 
-                            mcp_registry.tool_count(), mcp_registry.server_count());
+                        info!(
+                            "Loaded MCP registry with {} tools from {} servers",
+                            mcp_registry.tool_count(),
+                            mcp_registry.server_count()
+                        );
                         if !mcp_registry.list_names().is_empty() {
                             info!("MCP tools available: {:?}", mcp_registry.list_names());
                         }
@@ -250,7 +265,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some(source) = &agents_config.source {
                 info!("Loaded AGENTS.md from: {:?}", source);
             }
-            
+
             // Build extra system prompt: CLI --system-prompt + AGENTS.md
             let mut extra_prompt_parts: Vec<String> = Vec::new();
             if let Some(cli_prompt) = &cli.system_prompt {
@@ -267,17 +282,28 @@ async fn main() -> anyhow::Result<()> {
 
             let mut tools = ToolRegistry::new();
             tools.register(ToolBox::Bash(BashTool::new()));
-            tools.register(ToolBox::Read(ReadTool::new(config.skills_dir.clone().to_string_lossy().to_string())));
-            tools.register(ToolBox::Write(WriteTool::new(config.skills_dir.clone().to_string_lossy().to_string())));
+            tools.register(ToolBox::Read(ReadTool::new(
+                config.skills_dir.clone().to_string_lossy().to_string(),
+            )));
+            tools.register(ToolBox::Write(WriteTool::new(
+                config.skills_dir.clone().to_string_lossy().to_string(),
+            )));
 
             for skill in engine.registry().get_all() {
-                tools.register(ToolBox::Skill(SkillTool::new(skill.clone(), config.skills_dir.clone())));
+                tools.register(ToolBox::Skill(SkillTool::new(
+                    skill.clone(),
+                    config.skills_dir.clone(),
+                )));
             }
 
             let llm: Box<dyn skill_llm::LLMClient> = match cli.llm_provider.as_str() {
                 "minimax" => {
-                    let url = cli.minimax_url.unwrap_or_else(|| "https://api.minimax.io".to_string());
-                    let api_key = cli.minimax_api_key.unwrap_or_else(|| std::env::var("MINIMAX_API_KEY").unwrap_or_default());
+                    let url = cli
+                        .minimax_url
+                        .unwrap_or_else(|| "https://api.minimax.io".to_string());
+                    let api_key = cli
+                        .minimax_api_key
+                        .unwrap_or_else(|| std::env::var("MINIMAX_API_KEY").unwrap_or_default());
                     if api_key.is_empty() {
                         anyhow::bail!("MiniMax API key not provided. Set MINIMAX_API_KEY env var or --minimax-api-key flag.");
                     }
@@ -286,29 +312,35 @@ async fn main() -> anyhow::Result<()> {
                 }
                 "ollama" => {
                     info!("Using Ollama provider: {}", cli.ollama_url);
-                    Box::new(OllamaClient::new(cli.ollama_url.clone(), cli.llm_model.clone()))
+                    Box::new(OllamaClient::new(
+                        cli.ollama_url.clone(),
+                        cli.llm_model.clone(),
+                    ))
                 }
                 other => {
-                    anyhow::bail!("Unknown LLM provider: {}. Use 'ollama' or 'minimax'.", other)
+                    anyhow::bail!(
+                        "Unknown LLM provider: {}. Use 'ollama' or 'minimax'.",
+                        other
+                    )
                 }
             };
-            
+
             // Convert mcp_registry to Arc for sharing
             let mcp_registry = std::sync::Arc::new(mcp_registry);
-            
+
             // Add extra system prompt if provided
             let extra_prompt = extra_system_prompt.clone();
-            
+
             if cli.streaming {
                 let mut agent = StreamingAgent::new(llm)
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
                     .with_max_iterations(10);
-                
+
                 if let Some(prompt) = extra_prompt {
                     agent = agent.with_extra_system_prompt(prompt);
                 }
-                
+
                 let agent = agent;
 
                 println!("=== Skill Agent (Streaming Mode) ===");
@@ -323,10 +355,10 @@ async fn main() -> anyhow::Result<()> {
                 loop {
                     print!("\n> ");
                     io::stdout().flush()?;
-                    
+
                     let mut input = String::new();
                     io::stdin().read_line(&mut input)?;
-                    
+
                     let input = input.trim();
                     if input == "quit" || input == "exit" {
                         break;
@@ -342,11 +374,11 @@ async fn main() -> anyhow::Result<()> {
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
                     .with_max_iterations(10);
-                
+
                 if let Some(prompt) = extra_system_prompt {
                     agent_builder = agent_builder.with_extra_system_prompt(prompt);
                 }
-                
+
                 let agent = agent_builder;
 
                 println!("=== Skill Agent ===");
@@ -361,10 +393,10 @@ async fn main() -> anyhow::Result<()> {
                 loop {
                     print!("\n> ");
                     io::stdout().flush()?;
-                    
+
                     let mut input = String::new();
                     io::stdin().read_line(&mut input)?;
-                    
+
                     let input = input.trim();
                     if input == "quit" || input == "exit" {
                         break;
