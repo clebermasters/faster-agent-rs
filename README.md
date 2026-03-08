@@ -1,205 +1,178 @@
-# Skill Agent
+<div align="center">
+  <h1>🚀 Skill Agent</h1>
+  <p><strong>An autonomous AI agent that discovers and executes skills using semantic search and LLM tool chaining. Built with Rust.</strong></p>
 
-An autonomous AI agent that discovers and executes skills using semantic search and LLM tool chaining. Built with Rust.
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Rust](https://github.com/clebermasters/faster-agent-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/clebermasters/faster-agent-rs/actions/workflows/ci.yml)
+</div>
 
-## Overview
+<br/>
 
-Skill Agent is a system that:
-- **Discovers skills** from the filesystem using vector embeddings
-- **Executes skills** autonomously via an LLM agent loop
-- **Chains tools** together to complete multi-step tasks
-- **Supports multiple LLM providers** (MiniMax, Ollama)
+Skill Agent empowers your workflows by autonomously determining what needs to be done. It discovers capabilities (skills) from the filesystem using vector embeddings and seamlessly chains tools together to complete multi-step tasks.
 
-## Architecture
+## 🌟 Key Features
 
-```
+- **🧠 Semantic Skill Discovery**: Finds the right skills for the job using natural language queries and vector search.
+- **🔗 Autonomous Tool Chaining**: An intelligent LLM loop automatically calls multiple tools sequentially to resolve complex tasks.
+- **💬 Conversational Memory**: Retains conversation history within each session for continuous context.
+- **🤖 Multi-LLM Support**: Works out-of-the-box with MiniMax and Ollama.
+- **🛠️ Extensible Tooling**: Ships with built-in tools (`bash`, `read`, `write`) and supports custom file-based skills and the Model Context Protocol (MCP).
+
+---
+
+## 🏗️ Architecture
+
+The project is structured as a modular Rust workspace:
+
+```text
 skill-agent/
 ├── crates/
-│   ├── skill-core/         # Core types (Skill, Config)
-│   ├── skill-registry/     # Loads/parses SKILL.md files
-│   ├── skill-embeddings/   # Vector embeddings via Ollama
-│   ├── skill-discovery/    # Semantic skill search engine
-│   ├── skill-executor/     # Executes skill scripts
-│   ├── skill-tools/        # Tool abstractions (bash, read, write, skills)
-│   ├── skill-llm/          # LLM client + Agent loop
-│   └── skill-agent/        # CLI entry point
-└── skills/                 # Skill definitions
+│   ├── skill-core/         # Core data types and configuration
+│   ├── skill-registry/     # Loads and parses file-based skills (SKILL.md)
+│   ├── skill-embeddings/   # Local vector embeddings generation (via Ollama)
+│   ├── skill-discovery/    # Semantic and keyword skill search engine
+│   ├── skill-executor/     # Secure execution of skill scripts
+│   ├── skill-tools/        # Tool abstraction layer (bash, read, write)
+│   ├── skill-llm/          # LLM client integrations & Agent execution loops
+│   ├── skill-mcp/          # Model Context Protocol integration
+│   └── skill-agent/        # The main CLI entry point
+└── skills/                 # Directory containing custom skill definitions
 ```
 
-## Features
+---
 
-- **Semantic Skill Discovery**: Find skills using natural language queries
-- **Tool Chaining**: LLM automatically calls multiple tools in sequence
-- **Memory**: Conversation history maintained within each session
-- **Multiple LLM Providers**: MiniMax (default), Ollama
-- **Built-in Tools**: bash, read, write, and custom skills
+## ⚡ Getting Started
 
-## Installation
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (edition 2021)
+- [Ollama](https://ollama.com/) (For local embeddings and optional local LLM)
+
+### Installation
+
+Clone the repository and build the project:
 
 ```bash
-cd skill-agent
+git clone https://github.com/clebermasters/faster-agent-rs.git
+cd faster-agent-rs
 cargo build --release
 ```
 
-## Configuration
+### Configuration
 
-Create a `.env` file:
+Create a `.env` file in the root directory to configure your providers:
 
 ```bash
-# MiniMax (primary LLM)
-MINIMAX_API_KEY=your-api-key-here
+# MiniMax (Recommended primary LLM for optimal reasoning)
+MINIMAX_API_KEY=your-minimax-api-key
 
-# Ollama (embeddings + optional LLM)
+# Ollama (Required for vector embeddings; optional for LLM)
 OLLAMA_URL=http://localhost:11434
 EMBEDDING_MODEL=nomic-embed-text
 ```
 
-## Usage
+*Note: Ensure Ollama is running (`ollama serve`) and the embedding model is pulled (`ollama pull nomic-embed-text`).*
+
+---
+
+## 🎮 Usage
 
 ### Interactive Agent Mode
 
-```bash
-cargo run -- agent
-```
-
-### Single Command
+Start a continuous conversational session:
 
 ```bash
-cargo run -- agent "scrape https://example.com save to output.html"
+cargo run --release -- agent
 ```
 
-### CLI Options
+### Single Command Execution
+
+Run a specific, one-off task:
 
 ```bash
-cargo run -- --help
-
-# Key options:
-#   --llm-provider minmax|ollama   LLM provider (default: minimax)
-#   --llm-model MODEL              LLM model name
-#   --minimax-api-key KEY         MiniMax API key
-#   --ollama-url URL               Ollama URL
-#   -v, --verbose                  Enable verbose logging
+cargo run --release -- agent "scrape https://example.com and save the content to output.html"
 ```
 
-## Available Tools
+### Advanced CLI Options
+
+```bash
+cargo run --release -- --help
+
+# Useful flags:
+#   --llm-provider <PROVIDER>  Set to 'minimax' or 'ollama' (default: ollama)
+#   --llm-model <MODEL>        Specify the LLM model name
+#   -v, --verbose              Enable debug-level logging
+#   --streaming                Enable streaming output for the agent
+```
+
+---
+
+## 🧰 Built-in Tools
 
 | Tool | Description |
 |------|-------------|
-| `bash` | Execute shell commands |
-| `read` | Read files from disk |
-| `write` | Write/save content to files |
-| `skill_*` | Custom skills (web-scraper, rss-fetcher, etc.) |
+| `bash` | Execute shell commands safely within the environment. |
+| `read` | Read contents of files from the disk. |
+| `write` | Write or append content to files. |
+| `skill_*` | Dynamically discovered custom skills defined in your workspace. |
 
-## Example Commands
+### Example Scenarios
 
-### Web Scraping
-
+**Web Scraping & File Operations:**
 ```bash
-cargo run -- agent "scrape https://example.com save to example.html"
-cargo run -- agent "fetch https://httpbin.org/html save to page.html"
+cargo run -- agent "fetch https://httpbin.org/html, extract the text, and save to page.md"
 ```
 
-### File Operations
-
+**Complex Multi-Step Tasks:**
 ```bash
-cargo run -- agent "read skills/README.md and save to copy.md"
-cargo run -- agent "list all files in skills directory"
+cargo run -- agent "read README.md, summarize the architecture section, and save it to arch-summary.txt"
 ```
 
-### Shell Commands
+---
+
+## 🔌 Creating Custom Skills
+
+Extend the agent's capabilities by adding declarative skills. Create a new directory under `skills/` containing a `SKILL.md` file.
 
 ```bash
-cargo run -- agent "run bash: echo hello world"
-cargo run -- agent "check current directory"
-cargo run -- agent "what is 10+5?"
-```
-
-### Complex Tasks
-
-```bash
-# Multi-step: scrape, read, list
-cargo run -- agent "scrape example.com, read README.md, list files"
-
-# Get current time and save
-cargo run -- agent "get current date and save to timestamp.txt"
-```
-
-## Creating Custom Skills
-
-Skills are defined in directories with a `SKILL.md` file:
-
-```bash
-skills/my-skill/
-├── SKILL.md           # Skill definition
+skills/my-new-skill/
+├── SKILL.md           # Defines the skill's identity, triggers, and parameters
 └── scripts/
-    └── run.sh         # Execution script (optional)
+    └── run.sh         # (Optional) Executable logic for the skill
 ```
 
-### SKILL.md Format
+### Example `SKILL.md`
 
 ```markdown
-# My Skill
+---
+name: Web Scraper
+description: Extract readable content from web pages
+trigger:
+  - scrape
+  - extract html
+capabilities:
+  - Fetch web pages
+  - Parse HTML structures
+---
 
-Description of what the skill does.
-
-## Triggers
-- do something
-- execute task
-
-## Parameters
-- input: What to process (required)
+# Web Scraper Skill
+This skill extracts text from websites...
 ```
 
-### Example: Web Scraper Skill
+---
 
-```
-skills/web-scraper/
-├── SKILL.md
-└── scripts/
-    └── scrape.sh
-```
+## 🤝 Contributing
 
-## Memory & Sessions
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) to get started.
 
-- **Session-based**: Memory persists within a single agent session
-- **Conversation history**: All messages sent to LLM for context
-- **No persistence**: Memory is cleared when agent exits
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-To add persistent memory, implement conversation storage to disk.
+---
 
-## LLM Provider Setup
+## 📄 License
 
-### MiniMax (Recommended)
-
-```bash
-# Set in .env
-MINIMAX_API_KEY=sk-cp-...
-```
-
-### Ollama
-
-```bash
-# Run local Ollama
-ollama serve
-ollama pull llama3.2
-
-# Use with skill-agent
-cargo run -- --llm-provider ollama --llm-model llama3.2 agent "your task"
-```
-
-## Development
-
-```bash
-# Build
-cargo build
-
-# Run with debug logging
-cargo run -- -v agent "your task"
-
-# Run tests
-cargo test
-```
-
-## License
-
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

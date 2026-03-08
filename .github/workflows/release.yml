@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to Crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish skill-core
+        run: cargo publish -p skill-core --token ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-registry
+        run: cargo publish -p skill-registry --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-embeddings
+        run: cargo publish -p skill-embeddings --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-discovery
+        run: cargo publish -p skill-discovery --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-executor
+        run: cargo publish -p skill-executor --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-tools
+        run: cargo publish -p skill-tools --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-llm
+        run: cargo publish -p skill-llm --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-mcp
+        run: cargo publish -p skill-mcp --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish skill-agent
+        run: cargo publish -p skill-agent --token ${{ secrets.CRATES_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
