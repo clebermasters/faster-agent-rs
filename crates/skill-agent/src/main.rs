@@ -1,3 +1,5 @@
+mod agents;
+
 use clap::{Parser, Subcommand};
 use skill_core::{Config, SkillQuery};
 use skill_discovery::SkillDiscoveryEngine;
@@ -57,6 +59,14 @@ struct Cli {
 
     #[arg(long, default_value = "30")]
     mcp_timeout: u64,
+
+    /// Path to AGENTS.md file (default: ./AGENTS.md or ./CLAUDE.md)
+    #[arg(long)]
+    agents_file: Option<String>,
+
+    /// Additional system prompt to append to the agent's prompt
+    #[arg(long)]
+    system_prompt: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -235,6 +245,26 @@ async fn main() -> anyhow::Result<()> {
                 info!("No MCP config found at {:?}", cli.mcp_config);
             }
 
+            // Load AGENTS.md / custom system prompt
+            let agents_config = agents::AgentsConfig::load(cli.agents_file.as_deref());
+            if let Some(source) = &agents_config.source {
+                info!("Loaded AGENTS.md from: {:?}", source);
+            }
+            
+            // Build extra system prompt: CLI --system-prompt + AGENTS.md
+            let mut extra_prompt_parts: Vec<String> = Vec::new();
+            if let Some(cli_prompt) = &cli.system_prompt {
+                extra_prompt_parts.push(cli_prompt.clone());
+            }
+            if let Some(agents_content) = agents_config.content() {
+                extra_prompt_parts.push(agents_content.to_string());
+            }
+            let extra_system_prompt = if extra_prompt_parts.is_empty() {
+                None
+            } else {
+                Some(extra_prompt_parts.join("\n\n"))
+            };
+
             let mut tools = ToolRegistry::new();
             tools.register(ToolBox::Bash(BashTool::new()));
             tools.register(ToolBox::Read(ReadTool::new(config.skills_dir.clone().to_string_lossy().to_string())));
@@ -266,11 +296,20 @@ async fn main() -> anyhow::Result<()> {
             // Convert mcp_registry to Arc for sharing
             let mcp_registry = std::sync::Arc::new(mcp_registry);
             
+            // Add extra system prompt if provided
+            let extra_prompt = extra_system_prompt.clone();
+            
             if cli.streaming {
-                let agent = StreamingAgent::new(llm)
+                let mut agent = StreamingAgent::new(llm)
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
                     .with_max_iterations(10);
+                
+                if let Some(prompt) = extra_prompt {
+                    agent = agent.with_extra_system_prompt(prompt);
+                }
+                
+                let agent = agent;
 
                 println!("=== Skill Agent (Streaming Mode) ===");
                 println!("Type 'quit' to exit\n");
@@ -299,10 +338,16 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             } else {
-                let agent = Agent::new(llm)
+                let mut agent_builder = Agent::new(llm)
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
                     .with_max_iterations(10);
+                
+                if let Some(prompt) = extra_system_prompt {
+                    agent_builder = agent_builder.with_extra_system_prompt(prompt);
+                }
+                
+                let agent = agent_builder;
 
                 println!("=== Skill Agent ===");
                 println!("Type 'quit' to exit\n");

@@ -741,6 +741,7 @@ pub struct Agent {
     mcp_registry: Option<std::sync::Arc<skill_mcp::McpRegistry>>,
     max_iterations: usize,
     tool_call_history: HashMap<String, usize>,
+    extra_system_prompt: Option<String>,
 }
 
 impl Agent {
@@ -751,11 +752,17 @@ impl Agent {
             mcp_registry: None,
             max_iterations: 10,
             tool_call_history: HashMap::new(),
+            extra_system_prompt: None,
         }
     }
 
     pub fn with_tools(mut self, tools: ToolRegistry) -> Self {
         self.tool_registry = tools;
+        self
+    }
+
+    pub fn with_extra_system_prompt(mut self, prompt: String) -> Self {
+        self.extra_system_prompt = Some(prompt);
         self
     }
 
@@ -790,7 +797,7 @@ impl Agent {
             tools_list.join("\n")
         };
         
-        format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
+        let mut prompt = format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
 
 AVAILABLE TOOLS:
 {}
@@ -801,7 +808,15 @@ STRICT RULES:
 3. NEVER just output content - you MUST save it to a file with 'write'
 4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
 
-When you finish a task, provide a summary of what was done."#, tools_str)
+When you finish a task, provide a summary of what was done."#, tools_str);
+        
+        // Add extra system prompt (from AGENTS.md or CLI)
+        if let Some(ref extra) = self.extra_system_prompt {
+            prompt.push_str("\n\n");
+            prompt.push_str(extra);
+        }
+        
+        prompt
     }
 
     pub async fn run(&self, task: &str) -> Result<String> {
@@ -1073,6 +1088,7 @@ pub struct StreamingAgent {
     mcp_registry: Option<std::sync::Arc<skill_mcp::McpRegistry>>,
     max_iterations: usize,
     show_thinking: bool,
+    extra_system_prompt: Option<String>,
 }
 
 impl StreamingAgent {
@@ -1083,6 +1099,7 @@ impl StreamingAgent {
             mcp_registry: None,
             max_iterations: 10,
             show_thinking: true,
+            extra_system_prompt: None,
         }
     }
 
@@ -1103,6 +1120,11 @@ impl StreamingAgent {
 
     pub fn with_thinking(mut self, show: bool) -> Self {
         self.show_thinking = show;
+        self
+    }
+
+    pub fn with_extra_system_prompt(mut self, prompt: String) -> Self {
+        self.extra_system_prompt = Some(prompt);
         self
     }
 
@@ -1127,7 +1149,7 @@ impl StreamingAgent {
             tools_list.join("\n")
         };
         
-        format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
+        let mut prompt = format!(r#"You are an autonomous agent that MUST use tools to complete tasks.
 
 AVAILABLE TOOLS:
 {}
@@ -1138,7 +1160,15 @@ STRICT RULES:
 3. NEVER just output content - you MUST save it to a file with 'write'
 4. The task is NOT done until content is saved to a file (unless explicitly asked not to)
 
-When you finish a task, provide a summary of what was done."#, tools_str)
+When you finish a task, provide a summary of what was done."#, tools_str);
+        
+        // Add extra system prompt (from AGENTS.md or CLI)
+        if let Some(ref extra) = self.extra_system_prompt {
+            prompt.push_str("\n\n");
+            prompt.push_str(extra);
+        }
+        
+        prompt
     }
 
     pub async fn run(&self, task: &str) -> Result<String> {
