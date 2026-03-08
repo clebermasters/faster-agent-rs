@@ -116,6 +116,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    colored::control::set_override(true);
     dotenvy::dotenv().ok();
 
     let cli = Cli::parse();
@@ -361,7 +362,10 @@ async fn main() -> anyhow::Result<()> {
                     io::stdout().flush()?;
 
                     let mut input = String::new();
-                    io::stdin().read_line(&mut input)?;
+                    let bytes = io::stdin().read_line(&mut input)?;
+                    if bytes == 0 {
+                        break;
+                    }
 
                     let input = input.trim();
                     if input == "quit" || input == "exit" {
@@ -399,7 +403,10 @@ async fn main() -> anyhow::Result<()> {
                     io::stdout().flush()?;
 
                     let mut input = String::new();
-                    io::stdin().read_line(&mut input)?;
+                    let bytes = io::stdin().read_line(&mut input)?;
+                    if bytes == 0 {
+                        break;
+                    }
 
                     let input = input.trim();
                     if input == "quit" || input == "exit" {
