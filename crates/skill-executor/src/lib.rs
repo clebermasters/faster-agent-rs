@@ -88,7 +88,23 @@ impl SkillExecutor {
     ) -> Result<String, ExecutorError> {
         debug!("Running script: {:?} with input: {:?}", script_path, input);
 
-        let mut cmd = Command::new("bash");
+        let extension = script_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+
+        let (program, args) = match extension {
+            "py" => ("python3", vec!["-u"]),
+            "sh" => ("bash", vec![]),
+            "rb" => ("ruby", vec![]),
+            "js" => ("node", vec![]),
+            _ => ("bash", vec![]),
+        };
+
+        let mut cmd = Command::new(program);
+        for arg in &args {
+            cmd.arg(arg);
+        }
         cmd.arg(script_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
