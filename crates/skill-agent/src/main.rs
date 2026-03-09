@@ -106,11 +106,15 @@ enum Commands {
     /// List all available skills
     List,
 
-    /// Start interactive agent mode
+    /// Start agent mode
     Agent {
         /// Initial task
         #[arg(default_value = "")]
         task: String,
+
+        /// Keep the session open for continuous interaction
+        #[arg(short, long, default_value_t = false)]
+        interactive: bool,
     },
 
     /// Show system prompt for skill discovery
@@ -239,7 +243,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Agent { task } => {
+        Commands::Agent { task, interactive } => {
             engine.registry_mut().load().await?;
             engine.index_all().await?;
 
@@ -360,25 +364,27 @@ async fn main() -> anyhow::Result<()> {
                     println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
                 }
 
-                use std::io::{self, Write};
-                loop {
-                    print!("\n{} ", ">".bold().cyan());
-                    io::stdout().flush()?;
+                if interactive {
+                    use std::io::{self, Write};
+                    loop {
+                        print!("\n{} ", ">".bold().cyan());
+                        io::stdout().flush()?;
 
-                    let mut input = String::new();
-                    let bytes = io::stdin().read_line(&mut input)?;
-                    if bytes == 0 {
-                        break;
-                    }
+                        let mut input = String::new();
+                        let bytes = io::stdin().read_line(&mut input)?;
+                        if bytes == 0 {
+                            break;
+                        }
 
-                    let input = input.trim();
-                    if input == "quit" || input == "exit" {
-                        break;
-                    }
+                        let input = input.trim();
+                        if input == "quit" || input == "exit" {
+                            break;
+                        }
 
-                    if !input.is_empty() {
-                        let result = agent.run(input).await?;
-                        println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
+                        if !input.is_empty() {
+                            let result = agent.run(input).await?;
+                            println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
+                        }
                     }
                 }
             } else {
@@ -402,25 +408,27 @@ async fn main() -> anyhow::Result<()> {
                     println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
                 }
 
-                use std::io::{self, Write};
-                loop {
-                    print!("\n{} ", ">".bold().cyan());
-                    io::stdout().flush()?;
+                if interactive {
+                    use std::io::{self, Write};
+                    loop {
+                        print!("\n{} ", ">".bold().cyan());
+                        io::stdout().flush()?;
 
-                    let mut input = String::new();
-                    let bytes = io::stdin().read_line(&mut input)?;
-                    if bytes == 0 {
-                        break;
-                    }
+                        let mut input = String::new();
+                        let bytes = io::stdin().read_line(&mut input)?;
+                        if bytes == 0 {
+                            break;
+                        }
 
-                    let input = input.trim();
-                    if input == "quit" || input == "exit" {
-                        break;
-                    }
+                        let input = input.trim();
+                        if input == "quit" || input == "exit" {
+                            break;
+                        }
 
-                    if !input.is_empty() {
-                        let result = agent.run(input).await?;
-                        println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
+                        if !input.is_empty() {
+                            let result = agent.run(input).await?;
+                            println!("\n{}\n{}", "✨ Final Result:".bold().green(), result);
+                        }
                     }
                 }
             }
