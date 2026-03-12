@@ -949,13 +949,25 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                     if *count > 2 {
                         println!("{} {} {}", "⚠️  Warning:".bold().yellow(), call.name.bold(), "called multiple times. Forcing a different approach.".dimmed());
                         messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: format!(
+                                "__tool_use__:{}",
+                                serde_json::to_string(&json!({
+                                    "id": call.id,
+                                    "name": call.name,
+                                    "input": call.arguments
+                                })).unwrap_or_default()
+                            ),
+                            tool_call_id: None,
+                        });
+                        messages.push(Message {
                             role: "tool".to_string(),
                             content: format!(
                                 "ERROR: Tool '{}' has failed multiple times ({} attempts). \
                                 Try a DIFFERENT approach.",
                                 call.name, count
                             ),
-                            tool_call_id: None,
+                            tool_call_id: call.id.clone(),
                         });
                         continue;
                     }
@@ -999,6 +1011,18 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                         }
 
                         let result_message = Self::format_tool_result(&call.name, &result);
+                        messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: format!(
+                                "__tool_use__:{}",
+                                serde_json::to_string(&json!({
+                                    "id": call.id,
+                                    "name": call.name,
+                                    "input": call.arguments
+                                })).unwrap_or_default()
+                            ),
+                            tool_call_id: None,
+                        });
                         messages.push(Message {
                             role: "tool".to_string(),
                             content: result_message,
@@ -1055,6 +1079,18 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                             Ok(result) => {
                                 println!("{} {} returned {} characters.", "✅ Success:".bold().green(), mcp_tool_name.bold(), result.len());
                                 messages.push(Message {
+                                    role: "assistant".to_string(),
+                                    content: format!(
+                                        "__tool_use__:{}",
+                                        serde_json::to_string(&json!({
+                                            "id": call.id,
+                                            "name": call.name,
+                                            "input": call.arguments
+                                        })).unwrap_or_default()
+                                    ),
+                                    tool_call_id: None,
+                                });
+                                messages.push(Message {
                                     role: "tool".to_string(),
                                     content: result,
                                     tool_call_id: call.id.clone(),
@@ -1076,6 +1112,18 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                             Err(e) => {
                                 println!("{} {} failed: {}", "❌ Error:".bold().red(), mcp_tool_name.bold(), e);
                                 messages.push(Message {
+                                    role: "assistant".to_string(),
+                                    content: format!(
+                                        "__tool_use__:{}",
+                                        serde_json::to_string(&json!({
+                                            "id": call.id,
+                                            "name": call.name,
+                                            "input": call.arguments
+                                        })).unwrap_or_default()
+                                    ),
+                                    tool_call_id: None,
+                                });
+                                messages.push(Message {
                                     role: "tool".to_string(),
                                     content: format!(
                                         "ERROR: MCP tool '{}' failed: {}",
@@ -1089,9 +1137,21 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                     } else {
                         println!("{} {} not found.", "❌ Error:".bold().red(), call.name.bold());
                         messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: format!(
+                                "__tool_use__:{}",
+                                serde_json::to_string(&json!({
+                                    "id": call.id,
+                                    "name": call.name,
+                                    "input": call.arguments
+                                })).unwrap_or_default()
+                            ),
+                            tool_call_id: None,
+                        });
+                        messages.push(Message {
                             role: "tool".to_string(),
                             content: format!("ERROR: Tool '{}' not found.", call.name),
-                            tool_call_id: None,
+                            tool_call_id: call.id.clone(),
                         });
                     }
                 }
@@ -1449,12 +1509,24 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                 ))
                             );
                             messages.push(Message {
+                                role: "assistant".to_string(),
+                                content: format!(
+                                    "__tool_use__:{}",
+                                    serde_json::to_string(&json!({
+                                        "id": call.id,
+                                        "name": call.name,
+                                        "input": call.arguments
+                                    })).unwrap_or_default()
+                                ),
+                                tool_call_id: None,
+                            });
+                            messages.push(Message {
                                 role: "tool".to_string(),
                                 content: format!(
                                     "ERROR: Tool '{}' has failed multiple times ({} attempts). Try a DIFFERENT approach.",
                                     call.name, count
                                 ),
-                                tool_call_id: None,
+                                tool_call_id: call.id.clone(),
                             });
                             continue;
                         }
@@ -1512,6 +1584,18 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
 
                             let result_message = Agent::format_tool_result(&call.name, &result);
                             messages.push(Message {
+                                role: "assistant".to_string(),
+                                content: format!(
+                                    "__tool_use__:{}",
+                                    serde_json::to_string(&json!({
+                                        "id": call.id,
+                                        "name": call.name,
+                                        "input": call.arguments
+                                    })).unwrap_or_default()
+                                ),
+                                tool_call_id: None,
+                            });
+                            messages.push(Message {
                                 role: "tool".to_string(),
                                 content: result_message,
                                 tool_call_id: call.id.clone(),
@@ -1548,9 +1632,21 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                         call.name
                                     );
                                     messages.push(Message {
+                                        role: "assistant".to_string(),
+                                        content: format!(
+                                            "__tool_use__:{}",
+                                            serde_json::to_string(&json!({
+                                                "id": call.id,
+                                                "name": call.name,
+                                                "input": call.arguments
+                                            })).unwrap_or_default()
+                                        ),
+                                        tool_call_id: None,
+                                    });
+                                    messages.push(Message {
                                         role: "tool".to_string(),
                                         content: format!("ERROR: Tool '{}' not found.", call.name),
-                                        tool_call_id: None,
+                                        tool_call_id: call.id.clone(),
                                     });
                                     break;
                                 }
@@ -1584,6 +1680,18 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                         ))
                                     );
                                     messages.push(Message {
+                                        role: "assistant".to_string(),
+                                        content: format!(
+                                            "__tool_use__:{}",
+                                            serde_json::to_string(&json!({
+                                                "id": call.id,
+                                                "name": call.name,
+                                                "input": call.arguments
+                                            })).unwrap_or_default()
+                                        ),
+                                        tool_call_id: None,
+                                    });
+                                    messages.push(Message {
                                         role: "tool".to_string(),
                                         content: result,
                                         tool_call_id: call.id.clone(),
@@ -1611,6 +1719,18 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                             mcp_tool_name, e
                                         ))
                                     );
+                                    messages.push(Message {
+                                        role: "assistant".to_string(),
+                                        content: format!(
+                                            "__tool_use__:{}",
+                                            serde_json::to_string(&json!({
+                                                "id": call.id,
+                                                "name": call.name,
+                                                "input": call.arguments
+                                            })).unwrap_or_default()
+                                        ),
+                                        tool_call_id: None,
+                                    });
                                     messages.push(Message {
                                         role: "tool".to_string(),
                                         content: format!(

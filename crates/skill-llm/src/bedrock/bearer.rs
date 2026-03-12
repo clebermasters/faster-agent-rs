@@ -232,16 +232,25 @@ fn split_messages_json(
             }
 
             "tool" => {
-                let tool_use_id = msg.tool_call_id.clone().unwrap_or_default();
-                converse_messages.push(json!({
-                    "role": "user",
-                    "content": [{
-                        "toolResult": {
-                            "toolUseId": tool_use_id,
-                            "content": [{ "text": msg.content }]
-                        }
-                    }]
-                }));
+                // For Unreliable / None models that don't support toolResult blocks,
+                // encode as plain text so the model can still follow along.
+                if matches!(caps.tool_use, ToolUseSupport::Unreliable | ToolUseSupport::None) {
+                    converse_messages.push(json!({
+                        "role": "user",
+                        "content": [{ "text": format!("[Tool Result]: {}", msg.content) }]
+                    }));
+                } else {
+                    let tool_use_id = msg.tool_call_id.clone().unwrap_or_default();
+                    converse_messages.push(json!({
+                        "role": "user",
+                        "content": [{
+                            "toolResult": {
+                                "toolUseId": tool_use_id,
+                                "content": [{ "text": msg.content }]
+                            }
+                        }]
+                    }));
+                }
             }
 
             "user" => {
@@ -252,10 +261,63 @@ fn split_messages_json(
             }
 
             "assistant" => {
-                converse_messages.push(json!({
-                    "role": "assistant",
-                    "content": [{ "text": msg.content }]
-                }));
+                if let Some(rest) = msg.content.strip_prefix("__tool_use__:") {
+                    // Reconstruct the toolUse block that the agent loop encoded as a marker.
+                    // Bedrock Converse requires: assistant[toolUse] → user[toolResult].
+                    // For Unreliable / None models, fall back to plain text.
+                    let use_native_block = matches!(
+                        caps.tool_use,
+                        ToolUseSupport::Full | ToolUseSupport::ClientSide
+                    );
+
+                    match serde_json::from_str::<Value>(rest) {
+                        Ok(tu_json) => {
+                            if use_native_block {
+                                let tool_use_id =
+                                    tu_json["id"].as_str().unwrap_or("").to_string();
+                                let name =
+                                    tu_json["name"].as_str().unwrap_or("").to_string();
+                                let input = tu_json["input"].clone();
+                                converse_messages.push(json!({
+                                    "role": "assistant",
+                                    "content": [{
+                                        "toolUse": {
+                                            "toolUseId": tool_use_id,
+                                            "name": name,
+                                            "input": input
+                                        }
+                                    }]
+                                }));
+                            } else {
+                                // Text fallback for Unreliable / None models
+                                let name = tu_json["name"].as_str().unwrap_or("unknown");
+                                converse_messages.push(json!({
+                                    "role": "assistant",
+                                    "content": [{ "text": format!(
+                                        "[Calling tool: {} with args: {}]",
+                                        name, tu_json["input"]
+                                    )}]
+                                }));
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                "BedrockBearer: failed to parse __tool_use__ JSON: {} — \
+                                 emitting as text",
+                                e
+                            );
+                            converse_messages.push(json!({
+                                "role": "assistant",
+                                "content": [{ "text": msg.content }]
+                            }));
+                        }
+                    }
+                } else {
+                    converse_messages.push(json!({
+                        "role": "assistant",
+                        "content": [{ "text": msg.content }]
+                    }));
+                }
             }
 
             other => {

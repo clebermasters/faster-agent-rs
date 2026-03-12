@@ -11,6 +11,8 @@ use tracing::warn;
 use crate::{ChatResponse, Message, ToolCall};
 use skill_tools::ToolDefinition;
 
+use super::models::ToolUseSupport;
+
 use super::models::ModelCapabilities;
 
 // ---------------------------------------------------------------------------
@@ -50,22 +52,38 @@ pub fn split_messages(
             }
 
             "tool" => {
-                // Tool results must become a user message that contains a
-                // `toolResult` content block referencing the original tool-use ID.
-                let tool_use_id = msg.tool_call_id.clone().unwrap_or_default();
-                let result_block = ToolResultBlock::builder()
-                    .tool_use_id(&tool_use_id)
-                    .content(ToolResultContentBlock::Text(msg.content))
-                    .build()
-                    .expect("ToolResultBlock builder");
-
-                converse_messages.push(
-                    BedrockMessage::builder()
-                        .role(ConversationRole::User)
-                        .content(ContentBlock::ToolResult(result_block))
+                // For Unreliable / None models: encode as plain text — they do
+                // not support `toolResult` blocks in conversation history.
+                if matches!(caps.tool_use, ToolUseSupport::Unreliable | ToolUseSupport::None) {
+                    let text = format!(
+                        "[Tool Result]: {}",
+                        msg.content
+                    );
+                    converse_messages.push(
+                        BedrockMessage::builder()
+                            .role(ConversationRole::User)
+                            .content(ContentBlock::Text(text))
+                            .build()
+                            .expect("BedrockMessage builder"),
+                    );
+                } else {
+                    // Tool results must become a user message that contains a
+                    // `toolResult` content block referencing the original tool-use ID.
+                    let tool_use_id = msg.tool_call_id.clone().unwrap_or_default();
+                    let result_block = ToolResultBlock::builder()
+                        .tool_use_id(&tool_use_id)
+                        .content(ToolResultContentBlock::Text(msg.content))
                         .build()
-                        .expect("BedrockMessage builder"),
-                );
+                        .expect("ToolResultBlock builder");
+
+                    converse_messages.push(
+                        BedrockMessage::builder()
+                            .role(ConversationRole::User)
+                            .content(ContentBlock::ToolResult(result_block))
+                            .build()
+                            .expect("BedrockMessage builder"),
+                    );
+                }
             }
 
             "user" => {
@@ -79,13 +97,78 @@ pub fn split_messages(
             }
 
             "assistant" => {
-                converse_messages.push(
-                    BedrockMessage::builder()
-                        .role(ConversationRole::Assistant)
-                        .content(ContentBlock::Text(msg.content))
-                        .build()
-                        .expect("BedrockMessage builder"),
-                );
+                if let Some(rest) = msg.content.strip_prefix("__tool_use__:") {
+                    // Reconstruct the toolUse block that the agent loop encoded as a marker.
+                    // Bedrock Converse requires: assistant[toolUse] → user[toolResult].
+                    // For Unreliable / None models that don't support toolUse in history,
+                    // fall back to a plain text summary so the model can still follow along.
+                    let use_native_block = matches!(
+                        caps.tool_use,
+                        ToolUseSupport::Full | ToolUseSupport::ClientSide
+                    );
+
+                    match serde_json::from_str::<Value>(rest) {
+                        Ok(tu_json) => {
+                            if use_native_block {
+                                let tool_use_id =
+                                    tu_json["id"].as_str().unwrap_or("").to_string();
+                                let name =
+                                    tu_json["name"].as_str().unwrap_or("").to_string();
+                                let input_doc =
+                                    json_value_to_document(tu_json["input"].clone());
+                                let tu_block = ToolUseBlock::builder()
+                                    .tool_use_id(&tool_use_id)
+                                    .name(&name)
+                                    .input(input_doc)
+                                    .build()
+                                    .expect("ToolUseBlock builder");
+                                converse_messages.push(
+                                    BedrockMessage::builder()
+                                        .role(ConversationRole::Assistant)
+                                        .content(ContentBlock::ToolUse(tu_block))
+                                        .build()
+                                        .expect("BedrockMessage builder"),
+                                );
+                            } else {
+                                // Text fallback for Unreliable / None models
+                                let name = tu_json["name"].as_str().unwrap_or("unknown");
+                                let text = format!(
+                                    "[Calling tool: {} with args: {}]",
+                                    name, tu_json["input"]
+                                );
+                                converse_messages.push(
+                                    BedrockMessage::builder()
+                                        .role(ConversationRole::Assistant)
+                                        .content(ContentBlock::Text(text))
+                                        .build()
+                                        .expect("BedrockMessage builder"),
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Bedrock convert: failed to parse __tool_use__ JSON: {} — \
+                                 emitting as text",
+                                e
+                            );
+                            converse_messages.push(
+                                BedrockMessage::builder()
+                                    .role(ConversationRole::Assistant)
+                                    .content(ContentBlock::Text(msg.content))
+                                    .build()
+                                    .expect("BedrockMessage builder"),
+                            );
+                        }
+                    }
+                } else {
+                    converse_messages.push(
+                        BedrockMessage::builder()
+                            .role(ConversationRole::Assistant)
+                            .content(ContentBlock::Text(msg.content))
+                            .build()
+                            .expect("BedrockMessage builder"),
+                    );
+                }
             }
 
             other => {
