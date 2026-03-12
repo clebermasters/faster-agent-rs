@@ -33,6 +33,13 @@ async-trait = "0.1"
 anyhow = "1.0"
 async-stream = "0.3"
 
+# AWS Bedrock
+aws-config             = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-bedrockruntime = "1"
+aws-sdk-sts            = "1"
+aws-credential-types   = "1"
+aws-smithy-types       = "1"
+
 # MCP SDK
 rust-mcp-sdk = "0.8"
 rust-mcp-transport = "0.8"

@@ -13,7 +13,7 @@ skill-embeddings = { path = "../skill-embeddings" }
 skill-discovery = { path = "../skill-discovery" }
 skill-executor = { path = "../skill-executor" }
 skill-tools = { path = "../skill-tools" }
-skill-llm = { path = "../skill-llm" }
+skill-llm = { path = "../skill-llm", features = ["bedrock"] }
 skill-mcp = { path = "../skill-mcp" }
 serde = { workspace = true }
 serde_json = { workspace = true }

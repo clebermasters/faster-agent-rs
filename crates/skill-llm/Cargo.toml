@@ -19,8 +19,24 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
+# AWS Bedrock (optional — enabled via "bedrock" feature)
+aws-config             = { workspace = true, optional = true }
+aws-sdk-bedrockruntime = { workspace = true, optional = true }
+aws-sdk-sts            = { workspace = true, optional = true }
+aws-credential-types   = { workspace = true, optional = true }
+aws-smithy-types       = { workspace = true, optional = true }
+
 [dependencies.skill-tools]
 path = "../skill-tools"
 
 [dependencies.skill-mcp]
 path = "../skill-mcp"
+
+[features]
+bedrock = [
+    "aws-config",
+    "aws-sdk-bedrockruntime",
+    "aws-sdk-sts",
+    "aws-credential-types",
+    "aws-smithy-types",
+]

@@ -15,7 +15,7 @@ Skill Agent empowers your workflows by autonomously determining what needs to be
 - **🧠 Semantic Skill Discovery**: Finds the right skills for the job using natural language queries and vector search.
 - **🔗 Autonomous Tool Chaining**: An intelligent LLM loop automatically calls multiple tools sequentially to resolve complex tasks.
 - **💬 Conversational Memory**: Retains conversation history within each session for continuous context.
-- **🤖 Multi-LLM Support**: Works out-of-the-box with MiniMax and Ollama.
+- **🤖 Multi-LLM Support**: Works out-of-the-box with MiniMax, Ollama, and **AWS Bedrock** (Claude, Nova, MiniMax M2.1, ZAI GLM-4.7, and more).
 - **🛠️ Extensible Tooling**: Ships with built-in tools (`bash`, `read`, `write`) and supports custom file-based skills and the Model Context Protocol (MCP).
 
 ---
@@ -99,10 +99,15 @@ cargo run --release -- agent "scrape https://example.com and save the content to
 cargo run --release -- --help
 
 # Useful flags:
-#   --llm-provider <PROVIDER>  Set to 'minimax' or 'ollama' (default: ollama)
+#   --llm-provider <PROVIDER>  Set to 'minimax', 'ollama', or 'bedrock' (default: minimax)
 #   --llm-model <MODEL>        Specify the LLM model name
 #   -v, --verbose              Enable debug-level logging
 #   --streaming                Enable streaming output for the agent
+#
+# Bedrock-specific flags (when --llm-provider bedrock):
+#   --bedrock-auth <MODE>      Auth mode: default|static|sts-token|sts-role|api-key
+#   --bedrock-region <REGION>  AWS region (default: us-east-1)
+#   --bedrock-api-key <KEY>    Bedrock API Key (for api-key auth)
 ```
 
 ---
@@ -158,6 +163,20 @@ capabilities:
 # Web Scraper Skill
 This skill extracts text from websites...
 ```
+
+---
+
+## 🤖 LLM Providers
+
+| Provider | `--llm-provider` | Description |
+|---|---|---|
+| **MiniMax** | `minimax` | Default. Cloud API, strong reasoning and coding. |
+| **Ollama** | `ollama` | Local inference. Also used for vector embeddings. |
+| **AWS Bedrock** | `bedrock` | Access Claude, Nova, MiniMax M2.1, ZAI GLM-4.7 and more via Amazon Bedrock. Supports IAM, STS, and Bedrock API Key auth. |
+
+For full AWS Bedrock setup instructions, authentication modes, model-specific behaviour, and troubleshooting see:
+
+**[docs/providers/bedrock.md](docs/providers/bedrock.md)**
 
 ---
 

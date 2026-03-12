@@ -6,7 +6,7 @@ use skill_core::{Config, SkillQuery};
 use skill_discovery::SkillDiscoveryEngine;
 use skill_embeddings::EmbeddingService;
 use skill_executor::{ExecutionContext, SkillExecutor};
-use skill_llm::{Agent, MiniMaxClient, OllamaClient, StreamingAgent};
+use skill_llm::{Agent, BedrockAuth, MiniMaxClient, OllamaClient, StreamingAgent};
 use skill_mcp::McpRegistry;
 use skill_registry::SkillRegistry;
 use skill_tools::{BashTool, ReadTool, SkillTool, ToolBox, ToolRegistry, WriteTool};
@@ -72,6 +72,47 @@ struct Cli {
     /// Additional system prompt to append to the agent's prompt
     #[arg(long)]
     system_prompt: Option<String>,
+
+    // ------------------------------------------------------------------
+    // AWS Bedrock (--llm-provider bedrock)
+    // ------------------------------------------------------------------
+
+    /// Bedrock auth method: static | sts-token | sts-role | api-key | default
+    #[arg(long, env = "BEDROCK_AUTH", default_value = "default")]
+    bedrock_auth: String,
+
+    /// AWS region for Bedrock (default: us-east-1)
+    #[arg(long, env = "BEDROCK_REGION", default_value = "us-east-1")]
+    bedrock_region: String,
+
+    /// AWS Access Key ID (for static or sts-token auth)
+    #[arg(long, env = "BEDROCK_ACCESS_KEY_ID")]
+    bedrock_access_key_id: Option<String>,
+
+    /// AWS Secret Access Key (for static or sts-token auth)
+    #[arg(long, env = "BEDROCK_SECRET_ACCESS_KEY")]
+    bedrock_secret_access_key: Option<String>,
+
+    /// AWS Session Token (for sts-token auth — pre-obtained STS token)
+    #[arg(long, env = "BEDROCK_SESSION_TOKEN")]
+    bedrock_session_token: Option<String>,
+
+    /// IAM Role ARN to assume via STS (for sts-role auth)
+    #[arg(long, env = "BEDROCK_ROLE_ARN")]
+    bedrock_role_arn: Option<String>,
+
+    /// Session name tag for the assumed role (default: skill-agent)
+    #[arg(long, env = "BEDROCK_ROLE_SESSION_NAME", default_value = "skill-agent")]
+    bedrock_role_session_name: String,
+
+    /// External ID for cross-account role assumption (optional)
+    #[arg(long, env = "BEDROCK_EXTERNAL_ID")]
+    bedrock_external_id: Option<String>,
+
+    /// Bedrock API Key for the bedrock-mantle OpenAI-compatible endpoint
+    /// (for api-key auth — best for MiniMax and ZAI models)
+    #[arg(long, env = "BEDROCK_API_KEY")]
+    bedrock_api_key: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -326,9 +367,65 @@ async fn main() -> anyhow::Result<()> {
                         cli.llm_model.clone(),
                     ))
                 }
+                "bedrock" => {
+                    let auth = match cli.bedrock_auth.as_str() {
+                        "static" => BedrockAuth::Static {
+                            access_key_id: cli.bedrock_access_key_id.clone()
+                                .ok_or_else(|| anyhow::anyhow!(
+                                    "BEDROCK_ACCESS_KEY_ID required for --bedrock-auth static"
+                                ))?,
+                            secret_access_key: cli.bedrock_secret_access_key.clone()
+                                .ok_or_else(|| anyhow::anyhow!(
+                                    "BEDROCK_SECRET_ACCESS_KEY required for --bedrock-auth static"
+                                ))?,
+                        },
+                        "sts-token" => BedrockAuth::StsToken {
+                            access_key_id: cli.bedrock_access_key_id.clone()
+                                .ok_or_else(|| anyhow::anyhow!(
+                                    "BEDROCK_ACCESS_KEY_ID required for --bedrock-auth sts-token"
+                                ))?,
+                            secret_access_key: cli.bedrock_secret_access_key.clone()
+                                .ok_or_else(|| anyhow::anyhow!(
+                                    "BEDROCK_SECRET_ACCESS_KEY required for --bedrock-auth sts-token"
+                                ))?,
+                            session_token: cli.bedrock_session_token.clone()
+                                .ok_or_else(|| anyhow::anyhow!(
+                                    "BEDROCK_SESSION_TOKEN required for --bedrock-auth sts-token"
+                                ))?,
+                        },
+                        "sts-role" => BedrockAuth::StsAssumeRole {
+                            role_arn: cli.bedrock_role_arn.clone()
+                                .ok_or_else(|| anyhow::anyhow!(
+                                    "BEDROCK_ROLE_ARN required for --bedrock-auth sts-role"
+                                ))?,
+                            session_name: cli.bedrock_role_session_name.clone(),
+                            external_id: cli.bedrock_external_id.clone(),
+                            duration_secs: 3600,
+                        },
+                        "api-key" => BedrockAuth::BedrockApiKey {
+                            api_key: cli.bedrock_api_key.clone()
+                                .ok_or_else(|| anyhow::anyhow!(
+                                    "BEDROCK_API_KEY required for --bedrock-auth api-key"
+                                ))?,
+                            region: cli.bedrock_region.clone(),
+                        },
+                        _ => BedrockAuth::DefaultChain,
+                    };
+                    info!(
+                        "Using AWS Bedrock provider: auth={} region={} model={}",
+                        cli.bedrock_auth, cli.bedrock_region, cli.llm_model
+                    );
+                    skill_llm::create_bedrock_client(
+                        auth,
+                        cli.bedrock_region.clone(),
+                        cli.llm_model.clone(),
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to initialise Bedrock client: {}", e))?
+                }
                 other => {
                     anyhow::bail!(
-                        "Unknown LLM provider: {}. Use 'ollama' or 'minimax'.",
+                        "Unknown LLM provider: {}. Use 'minimax', 'ollama', or 'bedrock'.",
                         other
                     )
                 }

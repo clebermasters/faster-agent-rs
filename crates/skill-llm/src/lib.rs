@@ -12,6 +12,11 @@ use std::io::Write;
 use std::pin::Pin;
 use tracing::{debug, error, info, warn};
 
+#[cfg(feature = "bedrock")]
+pub mod bedrock;
+#[cfg(feature = "bedrock")]
+pub use bedrock::{BedrockAuth, create_bedrock_client};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
