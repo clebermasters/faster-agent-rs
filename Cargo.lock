@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "skill-agent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2656,7 +2656,7 @@ dependencies = [
 
 [[package]]
 name = "skill-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -2667,7 +2667,7 @@ dependencies = [
 
 [[package]]
 name = "skill-discovery"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -2682,7 +2682,7 @@ dependencies = [
 
 [[package]]
 name = "skill-embeddings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -2697,7 +2697,7 @@ dependencies = [
 
 [[package]]
 name = "skill-executor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2712,7 +2712,7 @@ dependencies = [
 
 [[package]]
 name = "skill-llm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2735,7 +2735,7 @@ dependencies = [
 
 [[package]]
 name = "skill-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2752,7 +2752,7 @@ dependencies = [
 
 [[package]]
 name = "skill-registry"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2769,7 +2769,7 @@ dependencies = [
 
 [[package]]
 name = "skill-tools"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",

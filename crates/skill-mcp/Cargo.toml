@@ -1,9 +1,11 @@
 [package]
 name = "skill-mcp"
 version.workspace = true
-edition.workspace = true
+description.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+edition.workspace = true
 
 [dependencies]
 rust-mcp-sdk = { workspace = true }
@@ -16,6 +18,5 @@ thiserror.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 futures.workspace = true
-
 [dev-dependencies]
 tokio-test = "0.4"

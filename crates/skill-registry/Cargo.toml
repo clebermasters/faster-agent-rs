@@ -1,10 +1,11 @@
 [package]
 name = "skill-registry"
 version.workspace = true
-edition.workspace = true
+description.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+edition.workspace = true
 
 [dependencies]
 skill-core = { path = "../skill-core" }
@@ -17,6 +18,5 @@ anyhow = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 walkdir = "2"
-
 [dev-dependencies]
 tempfile = "3"

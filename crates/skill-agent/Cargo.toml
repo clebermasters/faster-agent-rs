@@ -1,10 +1,11 @@
 [package]
 name = "skill-agent"
 version.workspace = true
-edition.workspace = true
+description.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+edition.workspace = true
 
 [dependencies]
 skill-core = { path = "../skill-core" }
@@ -25,6 +26,5 @@ tokio = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 dotenvy = "0.15"
 colored = "3.1.1"
-
 [dev-dependencies]
 tempfile = "3"
