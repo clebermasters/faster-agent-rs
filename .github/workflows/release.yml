@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
 
 jobs:
   publish:
@@ -18,45 +19,56 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
       - name: Publish skill-core
-        run: cargo publish -p skill-core --token ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish -p skill-core
+
+      - name: Wait for skill-core to be indexed
+        run: sleep 30
 
       - name: Publish skill-registry
-        run: cargo publish -p skill-registry --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish -p skill-registry
+
+      - name: Wait for skill-registry to be indexed
+        run: sleep 30
 
       - name: Publish skill-embeddings
-        run: cargo publish -p skill-embeddings --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish -p skill-embeddings
 
-      - name: Publish skill-discovery
-        run: cargo publish -p skill-discovery --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+      - name: Wait for skill-embeddings to be indexed
+        run: sleep 30
 
       - name: Publish skill-executor
-        run: cargo publish -p skill-executor --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish -p skill-executor
+
+      - name: Wait for skill-executor to be indexed
+        run: sleep 30
+
+      - name: Publish skill-discovery
+        run: cargo publish -p skill-discovery
+
+      - name: Wait for skill-discovery to be indexed
+        run: sleep 30
 
       - name: Publish skill-tools
-        run: cargo publish -p skill-tools --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish -p skill-tools
 
-      - name: Publish skill-llm
-        run: cargo publish -p skill-llm --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+      - name: Wait for skill-tools to be indexed
+        run: sleep 30
 
       - name: Publish skill-mcp
-        run: cargo publish -p skill-mcp --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish -p skill-mcp
+
+      - name: Wait for skill-mcp to be indexed
+        run: sleep 30
+
+      - name: Publish skill-llm
+        run: cargo publish -p skill-llm
+
+      - name: Wait for skill-llm to be indexed
+        run: sleep 30
 
       - name: Publish skill-agent
-        run: cargo publish -p skill-agent --token ${{ secrets.CRATES_TOKEN }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish -p skill-agent
