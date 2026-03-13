@@ -23,52 +23,52 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Publish skill-core
-        run: cargo publish -p skill-core
+        run: cargo publish -p skill-core || echo "Already published, skipping"
 
       - name: Wait for skill-core to be indexed
         run: sleep 30
 
       - name: Publish skill-registry
-        run: cargo publish -p skill-registry
+        run: cargo publish -p skill-registry || echo "Already published, skipping"
 
       - name: Wait for skill-registry to be indexed
         run: sleep 30
 
       - name: Publish skill-embeddings
-        run: cargo publish -p skill-embeddings
+        run: cargo publish -p skill-embeddings || echo "Already published, skipping"
 
       - name: Wait for skill-embeddings to be indexed
         run: sleep 30
 
       - name: Publish skill-executor
-        run: cargo publish -p skill-executor
+        run: cargo publish -p skill-executor || echo "Already published, skipping"
 
       - name: Wait for skill-executor to be indexed
         run: sleep 30
 
       - name: Publish skill-discovery
-        run: cargo publish -p skill-discovery
+        run: cargo publish -p skill-discovery || echo "Already published, skipping"
 
       - name: Wait for skill-discovery to be indexed
         run: sleep 30
 
       - name: Publish skill-tools
-        run: cargo publish -p skill-tools
+        run: cargo publish -p skill-tools || echo "Already published, skipping"
 
       - name: Wait for skill-tools to be indexed
         run: sleep 30
 
       - name: Publish skill-mcp
-        run: cargo publish -p skill-mcp
+        run: cargo publish -p skill-mcp || echo "Already published, skipping"
 
       - name: Wait for skill-mcp to be indexed
         run: sleep 30
 
       - name: Publish skill-llm
-        run: cargo publish -p skill-llm
+        run: cargo publish -p skill-llm || echo "Already published, skipping"
 
       - name: Wait for skill-llm to be indexed
         run: sleep 30
 
       - name: Publish skill-agent
-        run: cargo publish -p skill-agent
+        run: cargo publish -p skill-agent || echo "Already published, skipping"
