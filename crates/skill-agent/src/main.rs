@@ -285,8 +285,8 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::Agent { task, interactive } => {
+            // Load skill metadata only (no embedding indexing needed)
             engine.registry_mut().load().await?;
-            engine.index_all().await?;
 
             // Load MCP servers (lazy - will connect on first use)
             let mut mcp_registry = McpRegistry::new(Duration::from_secs(cli.mcp_timeout));
@@ -339,12 +339,12 @@ async fn main() -> anyhow::Result<()> {
                 config.skills_dir.clone().to_string_lossy().to_string(),
             )));
 
-            for skill in engine.registry().get_all() {
-                tools.register(ToolBox::Skill(SkillTool::new(
-                    skill.clone(),
-                    config.skills_dir.clone(),
-                )));
-            }
+            // Register a single SkillTool holding all skills (metadata in system
+            // prompt, full instructions read on demand during execution)
+            let all_skills = engine.registry().get_all().into_iter().cloned().collect();
+            let skill_tool = SkillTool::new(all_skills, config.skills_dir.clone());
+            info!("Registered {} skills via run_skill tool", skill_tool.skill_count());
+            tools.register(ToolBox::Skill(skill_tool));
 
             let llm: Box<dyn skill_llm::LLMClient> = match cli.llm_provider.as_str() {
                 "minimax" => {

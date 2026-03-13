@@ -93,6 +93,19 @@ impl ToolRegistry {
     pub fn names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
     }
+
+    /// Return the skill metadata catalog from the SkillTool (if registered).
+    pub fn skill_catalog(&self) -> Option<String> {
+        for tool in self.tools.values() {
+            if let ToolBox::Skill(skill_tool) = tool {
+                let catalog = skill_tool.skill_catalog();
+                if !catalog.is_empty() {
+                    return Some(catalog);
+                }
+            }
+        }
+        None
+    }
 }
 
 impl Default for ToolRegistry {

@@ -824,11 +824,22 @@ impl Agent {
             tools_list.join("\n")
         };
 
+        // Build skill catalog section (metadata only — no full instructions)
+        let skill_catalog_section = match self.tool_registry.skill_catalog() {
+            Some(catalog) => format!(
+                "\n\nSKILL CATALOG:\n\
+                 The following skills are available via the 'run_skill' tool.\n\
+                 To use a skill, call run_skill with the skill_id and your input.\n\
+                 {}", catalog
+            ),
+            None => String::new(),
+        };
+
         let mut prompt = format!(
             r#"You are an autonomous agent that MUST use tools to complete tasks.
 
 AVAILABLE TOOLS:
-{}
+{}{}
 
 STRICT RULES:
 1. You MUST use tools to gather information or execute actions when needed.
@@ -837,7 +848,7 @@ STRICT RULES:
 4. If the user asks a question, use tools to find the answer and print the summary directly.
 
 When you finish a task, provide a clear, formatted summary of what was done."#,
-            tools_str
+            tools_str, skill_catalog_section
         );
 
         // Add extra system prompt (from AGENTS.md or CLI)
@@ -1298,11 +1309,22 @@ impl StreamingAgent {
             tools_list.join("\n")
         };
 
+        // Build skill catalog section (metadata only — no full instructions)
+        let skill_catalog_section = match self.tool_registry.skill_catalog() {
+            Some(catalog) => format!(
+                "\n\nSKILL CATALOG:\n\
+                 The following skills are available via the 'run_skill' tool.\n\
+                 To use a skill, call run_skill with the skill_id and your input.\n\
+                 {}", catalog
+            ),
+            None => String::new(),
+        };
+
         let mut prompt = format!(
             r#"You are an autonomous agent that MUST use tools to complete tasks.
 
 AVAILABLE TOOLS:
-{}
+{}{}
 
 STRICT RULES:
 1. You MUST use tools to gather information or execute actions when needed.
@@ -1311,7 +1333,7 @@ STRICT RULES:
 4. If the user asks a question, use tools to find the answer and print the summary directly.
 
 When you finish a task, provide a clear, formatted summary of what was done."#,
-            tools_str
+            tools_str, skill_catalog_section
         );
 
         // Add extra system prompt (from AGENTS.md or CLI)

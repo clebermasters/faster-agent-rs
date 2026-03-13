@@ -178,6 +178,11 @@ For full AWS Bedrock setup instructions, authentication modes, model-specific be
 
 **[docs/providers/bedrock.md](docs/providers/bedrock.md)**
 
+### Tested Models from Bedrock:
+global.anthropic.claude-haiku-4-5-20251001-v1:0
+global.anthropic.claude-haiku-4-5-20251001-v1:0
+global.amazon.nova-2-lite-v1:0
+
 ---
 
 ## 🤝 Contributing
