@@ -15,5 +15,5 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
-skill-core = { path = "../skill-core" }
-skill-executor = { path = "../skill-executor" }
+skill-core = { path = "../skill-core", version = "0.2.0" }
+skill-executor = { path = "../skill-executor", version = "0.2.0" }

@@ -28,9 +28,11 @@ aws-smithy-types       = { workspace = true, optional = true }
 
 [dependencies.skill-tools]
 path = "../skill-tools"
+version = "0.2.0"
 
 [dependencies.skill-mcp]
 path = "../skill-mcp"
+version = "0.2.0"
 
 [features]
 bedrock = [

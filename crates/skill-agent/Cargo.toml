@@ -8,14 +8,14 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-skill-core = { path = "../skill-core" }
-skill-registry = { path = "../skill-registry" }
-skill-embeddings = { path = "../skill-embeddings" }
-skill-discovery = { path = "../skill-discovery" }
-skill-executor = { path = "../skill-executor" }
-skill-tools = { path = "../skill-tools" }
-skill-llm = { path = "../skill-llm", features = ["bedrock"] }
-skill-mcp = { path = "../skill-mcp" }
+skill-core = { path = "../skill-core", version = "0.2.0" }
+skill-registry = { path = "../skill-registry", version = "0.2.0" }
+skill-embeddings = { path = "../skill-embeddings", version = "0.2.0" }
+skill-discovery = { path = "../skill-discovery", version = "0.2.0" }
+skill-executor = { path = "../skill-executor", version = "0.2.0" }
+skill-tools = { path = "../skill-tools", version = "0.2.0" }
+skill-llm = { path = "../skill-llm", version = "0.2.0", features = ["bedrock"] }
+skill-mcp = { path = "../skill-mcp", version = "0.2.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

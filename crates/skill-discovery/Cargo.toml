@@ -8,9 +8,9 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-skill-core = { path = "../skill-core" }
-skill-registry = { path = "../skill-registry" }
-skill-embeddings = { path = "../skill-embeddings" }
+skill-core = { path = "../skill-core", version = "0.2.0" }
+skill-registry = { path = "../skill-registry", version = "0.2.0" }
+skill-embeddings = { path = "../skill-embeddings", version = "0.2.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

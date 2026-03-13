@@ -8,7 +8,7 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-skill-core = { path = "../skill-core" }
+skill-core = { path = "../skill-core", version = "0.2.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
