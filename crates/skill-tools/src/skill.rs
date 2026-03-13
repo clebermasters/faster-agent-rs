@@ -15,10 +15,7 @@ pub struct SkillTool {
 impl SkillTool {
     pub fn new(skills: Vec<Skill>, skills_base_dir: PathBuf) -> Self {
         let executor = SkillExecutor::new(skills_base_dir);
-        let map = skills
-            .into_iter()
-            .map(|s| (s.id.clone(), s))
-            .collect();
+        let map = skills.into_iter().map(|s| (s.id.clone(), s)).collect();
         Self {
             skills: map,
             executor: Arc::new(executor),
@@ -102,10 +99,7 @@ impl SkillTool {
 
         let context = ExecutionContext::default();
 
-        info!(
-            "Executing skill '{}' with input: {:?}",
-            skill_id, input
-        );
+        info!("Executing skill '{}' with input: {:?}", skill_id, input);
         let result = self
             .executor
             .execute_skill(skill, input.as_deref(), &context)

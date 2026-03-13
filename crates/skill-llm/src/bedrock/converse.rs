@@ -1,8 +1,6 @@
 use anyhow::{Context, Result};
 use async_stream::stream;
-use aws_sdk_bedrockruntime::types::{
-    ContentBlockDelta, ConverseStreamOutput,
-};
+use aws_sdk_bedrockruntime::types::{ContentBlockDelta, ConverseStreamOutput};
 use futures::Stream;
 use serde_json::json;
 use std::pin::Pin;

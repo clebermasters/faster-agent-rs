@@ -1,0 +1,15 @@
+Crates Directory Summary
+======================
+
+Total directories found: 20
+
+Directory structure:
+- skill-agent (2 files)
+- skill-core (1 file)
+- skill-discovery (3 files)
+- skill-embeddings (2 files)
+- skill-executor (3 files)
+- skill-llm (6 files)
+- skill-mcp (5 files)
+- skill-registry (2 files)
+- skill-tools (5 files)

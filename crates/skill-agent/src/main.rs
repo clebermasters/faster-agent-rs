@@ -62,7 +62,6 @@ struct Cli {
     // ------------------------------------------------------------------
     // AWS Bedrock (--llm-provider bedrock)
     // ------------------------------------------------------------------
-
     /// Bedrock auth method: static | sts-token | sts-role | api-key | default
     #[arg(long, env = "BEDROCK_AUTH", default_value = "default")]
     bedrock_auth: String,
@@ -379,7 +378,10 @@ async fn main() -> anyhow::Result<()> {
             // Single SkillTool holds all skills; catalog injected into system prompt
             let all_skills = registry.get_all().into_iter().cloned().collect();
             let skill_tool = SkillTool::new(all_skills, cli.skills_dir.clone());
-            info!("Registered {} skills via run_skill tool", skill_tool.skill_count());
+            info!(
+                "Registered {} skills via run_skill tool",
+                skill_tool.skill_count()
+            );
             tools.register(ToolBox::Skill(skill_tool));
 
             let llm: Box<dyn skill_llm::LLMClient> = match cli.llm_provider.as_str() {
@@ -470,7 +472,11 @@ async fn main() -> anyhow::Result<()> {
             let extra_prompt = extra_system_prompt.clone();
 
             if cli.streaming {
-                let max_iters = if cli.max_iterations < 0 { usize::MAX } else { cli.max_iterations as usize };
+                let max_iters = if cli.max_iterations < 0 {
+                    usize::MAX
+                } else {
+                    cli.max_iterations as usize
+                };
                 let mut agent = StreamingAgent::new(llm)
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
@@ -499,10 +505,14 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut input = String::new();
                         let bytes = io::stdin().read_line(&mut input)?;
-                        if bytes == 0 { break; }
+                        if bytes == 0 {
+                            break;
+                        }
 
                         let input = input.trim();
-                        if input == "quit" || input == "exit" { break; }
+                        if input == "quit" || input == "exit" {
+                            break;
+                        }
 
                         if !input.is_empty() {
                             let result = agent.run(input).await?;
@@ -511,7 +521,11 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             } else {
-                let max_iters = if cli.max_iterations < 0 { usize::MAX } else { cli.max_iterations as usize };
+                let max_iters = if cli.max_iterations < 0 {
+                    usize::MAX
+                } else {
+                    cli.max_iterations as usize
+                };
                 let mut agent_builder = Agent::new(llm)
                     .with_tools(tools)
                     .with_mcp_registry(mcp_registry.clone())
@@ -539,10 +553,14 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut input = String::new();
                         let bytes = io::stdin().read_line(&mut input)?;
-                        if bytes == 0 { break; }
+                        if bytes == 0 {
+                            break;
+                        }
 
                         let input = input.trim();
-                        if input == "quit" || input == "exit" { break; }
+                        if input == "quit" || input == "exit" {
+                            break;
+                        }
 
                         if !input.is_empty() {
                             let result = agent.run(input).await?;
@@ -562,8 +580,8 @@ async fn main() -> anyhow::Result<()> {
 
             let ollama_url = std::env::var("OLLAMA_URL")
                 .unwrap_or_else(|_| "http://localhost:11434".to_string());
-            let embedding_model = std::env::var("EMBEDDING_MODEL")
-                .unwrap_or_else(|_| "nomic-embed-text".to_string());
+            let embedding_model =
+                std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "nomic-embed-text".to_string());
             let db_path = PathBuf::from("./skill-agent.db");
 
             let embeddings = EmbeddingService::new_ollama(ollama_url, embedding_model, db_path);

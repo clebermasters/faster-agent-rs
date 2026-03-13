@@ -1,7 +1,7 @@
 pub mod auth;
 pub mod bearer;
-pub mod convert;
 pub mod converse;
+pub mod convert;
 pub mod mantle;
 pub mod models;
 
@@ -10,8 +10,8 @@ pub use bearer::BedrockBearerClient;
 pub use converse::BedrockConverseClient;
 pub use mantle::BedrockMantleClient;
 
-use anyhow::Result;
 use crate::LLMClient;
+use anyhow::Result;
 
 /// Create the appropriate Bedrock client based on the chosen auth mode.
 ///
@@ -40,12 +40,12 @@ pub async fn create_bedrock_client(
             // Use BedrockBearerClient (reqwest + HTTP/1.1) for ABSK tokens.
             // The standard bedrock-runtime endpoint supports
             // `Authorization: Bearer {absk_token}` auth over HTTP/1.1.
-            Ok(Box::new(BedrockBearerClient::new(api_key, region, model_id)))
+            Ok(Box::new(BedrockBearerClient::new(
+                api_key, region, model_id,
+            )))
         }
-        other => {
-            Ok(Box::new(
-                BedrockConverseClient::new(other, region, model_id).await?,
-            ))
-        }
+        other => Ok(Box::new(
+            BedrockConverseClient::new(other, region, model_id).await?,
+        )),
     }
 }

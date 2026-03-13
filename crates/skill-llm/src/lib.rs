@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 #[cfg(feature = "bedrock")]
 pub mod bedrock;
 #[cfg(feature = "bedrock")]
-pub use bedrock::{BedrockAuth, create_bedrock_client};
+pub use bedrock::{create_bedrock_client, BedrockAuth};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -830,7 +830,8 @@ impl Agent {
                 "\n\nSKILL CATALOG:\n\
                  The following skills are available via the 'run_skill' tool.\n\
                  To use a skill, call run_skill with the skill_id and your input.\n\
-                 {}", catalog
+                 {}",
+                catalog
             ),
             None => String::new(),
         };
@@ -927,7 +928,7 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                 .chat(messages.clone(), Some(tool_defs.clone()))
                 .await;
             spinner.finish_and_clear();
-            
+
             let response = response_result?;
 
             debug!(
@@ -948,8 +949,13 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                 // Execute tool calls ONE AT A TIME and ask LLM for next step after each
                 // This enables chaining - LLM sees result before deciding next action
                 for (i, call) in tool_calls.iter().enumerate() {
-                    let formatted_args = serde_json::to_string_pretty(&call.arguments).unwrap_or_else(|_| format!("{:?}", call.arguments));
-                    println!("\n{} {}", "⚙️  Action:".bold().yellow(), call.name.bold().white());
+                    let formatted_args = serde_json::to_string_pretty(&call.arguments)
+                        .unwrap_or_else(|_| format!("{:?}", call.arguments));
+                    println!(
+                        "\n{} {}",
+                        "⚙️  Action:".bold().yellow(),
+                        call.name.bold().white()
+                    );
                     println!("{}", formatted_args.dimmed());
 
                     let call_key = format!("{}:{}", call.name, call.arguments);
@@ -958,7 +964,12 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                     debug!("Tool '{}' call count: {}", call.name, count);
 
                     if *count > 2 {
-                        println!("{} {} {}", "⚠️  Warning:".bold().yellow(), call.name.bold(), "called multiple times. Forcing a different approach.".dimmed());
+                        println!(
+                            "{} {} {}",
+                            "⚠️  Warning:".bold().yellow(),
+                            call.name.bold(),
+                            "called multiple times. Forcing a different approach.".dimmed()
+                        );
                         messages.push(Message {
                             role: "assistant".to_string(),
                             content: format!(
@@ -967,7 +978,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                     "id": call.id,
                                     "name": call.name,
                                     "input": call.arguments
-                                })).unwrap_or_default()
+                                }))
+                                .unwrap_or_default()
                             ),
                             tool_call_id: None,
                         });
@@ -994,18 +1006,34 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                             call.arguments.clone()
                         };
 
-                        let tool_spinner = create_spinner(&format!("Executing {}...", call.name).yellow().to_string());
+                        let tool_spinner = create_spinner(
+                            &format!("Executing {}...", call.name).yellow().to_string(),
+                        );
                         let result = tool.execute(args).await;
                         tool_spinner.finish_and_clear();
                         let result = result?;
 
                         if result.success {
-                            println!("{} {} returned {} characters.", "✅ Success:".bold().green(), call.name.bold(), result.output.len());
+                            println!(
+                                "{} {} returned {} characters.",
+                                "✅ Success:".bold().green(),
+                                call.name.bold(),
+                                result.output.len()
+                            );
                         } else {
                             if let Some(err) = &result.error {
-                                println!("{} {} failed: {}", "❌ Error:".bold().red(), call.name.bold(), err);
+                                println!(
+                                    "{} {} failed: {}",
+                                    "❌ Error:".bold().red(),
+                                    call.name.bold(),
+                                    err
+                                );
                             } else {
-                                println!("{} {} failed.", "❌ Error:".bold().red(), call.name.bold());
+                                println!(
+                                    "{} {} failed.",
+                                    "❌ Error:".bold().red(),
+                                    call.name.bold()
+                                );
                             }
                         }
 
@@ -1030,7 +1058,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                     "id": call.id,
                                     "name": call.name,
                                     "input": call.arguments
-                                })).unwrap_or_default()
+                                }))
+                                .unwrap_or_default()
                             ),
                             tool_call_id: None,
                         });
@@ -1082,13 +1111,22 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                             call.arguments.clone()
                         };
 
-                        let tool_spinner = create_spinner(&format!("Executing MCP tool {}...", mcp_tool_name).yellow().to_string());
+                        let tool_spinner = create_spinner(
+                            &format!("Executing MCP tool {}...", mcp_tool_name)
+                                .yellow()
+                                .to_string(),
+                        );
                         let mcp_result = mcp.call_tool(&mcp_tool_name, args).await;
                         tool_spinner.finish_and_clear();
 
                         match mcp_result {
                             Ok(result) => {
-                                println!("{} {} returned {} characters.", "✅ Success:".bold().green(), mcp_tool_name.bold(), result.len());
+                                println!(
+                                    "{} {} returned {} characters.",
+                                    "✅ Success:".bold().green(),
+                                    mcp_tool_name.bold(),
+                                    result.len()
+                                );
                                 messages.push(Message {
                                     role: "assistant".to_string(),
                                     content: format!(
@@ -1097,7 +1135,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                             "id": call.id,
                                             "name": call.name,
                                             "input": call.arguments
-                                        })).unwrap_or_default()
+                                        }))
+                                        .unwrap_or_default()
                                     ),
                                     tool_call_id: None,
                                 });
@@ -1121,7 +1160,12 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                 break;
                             }
                             Err(e) => {
-                                println!("{} {} failed: {}", "❌ Error:".bold().red(), mcp_tool_name.bold(), e);
+                                println!(
+                                    "{} {} failed: {}",
+                                    "❌ Error:".bold().red(),
+                                    mcp_tool_name.bold(),
+                                    e
+                                );
                                 messages.push(Message {
                                     role: "assistant".to_string(),
                                     content: format!(
@@ -1130,7 +1174,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                             "id": call.id,
                                             "name": call.name,
                                             "input": call.arguments
-                                        })).unwrap_or_default()
+                                        }))
+                                        .unwrap_or_default()
                                     ),
                                     tool_call_id: None,
                                 });
@@ -1146,7 +1191,11 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                             }
                         }
                     } else {
-                        println!("{} {} not found.", "❌ Error:".bold().red(), call.name.bold());
+                        println!(
+                            "{} {} not found.",
+                            "❌ Error:".bold().red(),
+                            call.name.bold()
+                        );
                         messages.push(Message {
                             role: "assistant".to_string(),
                             content: format!(
@@ -1155,7 +1204,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                     "id": call.id,
                                     "name": call.name,
                                     "input": call.arguments
-                                })).unwrap_or_default()
+                                }))
+                                .unwrap_or_default()
                             ),
                             tool_call_id: None,
                         });
@@ -1315,7 +1365,8 @@ impl StreamingAgent {
                 "\n\nSKILL CATALOG:\n\
                  The following skills are available via the 'run_skill' tool.\n\
                  To use a skill, call run_skill with the skill_id and your input.\n\
-                 {}", catalog
+                 {}",
+                catalog
             ),
             None => String::new(),
         };
@@ -1538,7 +1589,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                         "id": call.id,
                                         "name": call.name,
                                         "input": call.arguments
-                                    })).unwrap_or_default()
+                                    }))
+                                    .unwrap_or_default()
                                 ),
                                 tool_call_id: None,
                             });
@@ -1567,7 +1619,9 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                 call.arguments.clone()
                             };
 
-                            let tool_spinner = create_spinner(&format!("Executing {}...", call.name).yellow().to_string());
+                            let tool_spinner = create_spinner(
+                                &format!("Executing {}...", call.name).yellow().to_string(),
+                            );
                             let result = tool.execute(args).await;
                             tool_spinner.finish_and_clear();
                             let result = result?;
@@ -1613,7 +1667,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                         "id": call.id,
                                         "name": call.name,
                                         "input": call.arguments
-                                    })).unwrap_or_default()
+                                    }))
+                                    .unwrap_or_default()
                                 ),
                                 tool_call_id: None,
                             });
@@ -1661,7 +1716,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                                 "id": call.id,
                                                 "name": call.name,
                                                 "input": call.arguments
-                                            })).unwrap_or_default()
+                                            }))
+                                            .unwrap_or_default()
                                         ),
                                         tool_call_id: None,
                                     });
@@ -1687,7 +1743,11 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                 call.arguments.clone()
                             };
 
-                            let tool_spinner = create_spinner(&format!("Executing MCP tool {}...", mcp_tool_name).yellow().to_string());
+                            let tool_spinner = create_spinner(
+                                &format!("Executing MCP tool {}...", mcp_tool_name)
+                                    .yellow()
+                                    .to_string(),
+                            );
                             let mcp_result = mcp.call_tool(&mcp_tool_name, args).await;
                             tool_spinner.finish_and_clear();
 
@@ -1709,7 +1769,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                                 "id": call.id,
                                                 "name": call.name,
                                                 "input": call.arguments
-                                            })).unwrap_or_default()
+                                            }))
+                                            .unwrap_or_default()
                                         ),
                                         tool_call_id: None,
                                     });
@@ -1749,7 +1810,8 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                                                 "id": call.id,
                                                 "name": call.name,
                                                 "input": call.arguments
-                                            })).unwrap_or_default()
+                                            }))
+                                            .unwrap_or_default()
                                         ),
                                         tool_call_id: None,
                                     });

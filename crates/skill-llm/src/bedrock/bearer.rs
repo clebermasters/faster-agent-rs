@@ -73,11 +73,7 @@ impl BedrockBearerClient {
         )
     }
 
-    fn build_body(
-        &self,
-        messages: Vec<Message>,
-        tools: Option<Vec<ToolDefinition>>,
-    ) -> Value {
+    fn build_body(&self, messages: Vec<Message>, tools: Option<Vec<ToolDefinition>>) -> Value {
         let (system_parts, converse_messages) = split_messages_json(&messages, &self.caps);
 
         let mut body = json!({ "messages": converse_messages });
@@ -93,8 +89,7 @@ impl BedrockBearerClient {
 
         // Nova: topK inside additionalModelRequestFields
         if self.caps.topk_via_additional_fields {
-            body["additionalModelRequestFields"] =
-                json!({ "inferenceConfig": { "topK": 50 } });
+            body["additionalModelRequestFields"] = json!({ "inferenceConfig": { "topK": 50 } });
         }
 
         if let Some(tools) = tools {
@@ -209,10 +204,7 @@ impl LLMClient for BedrockBearerClient {
 ///
 /// Returns `(system_blocks, messages)` — system blocks go into the top-level
 /// `"system"` field; everything else becomes a Converse `messages` entry.
-fn split_messages_json(
-    messages: &[Message],
-    caps: &ModelCapabilities,
-) -> (Vec<Value>, Vec<Value>) {
+fn split_messages_json(messages: &[Message], caps: &ModelCapabilities) -> (Vec<Value>, Vec<Value>) {
     let mut system_parts: Vec<Value> = Vec::new();
     let mut converse_messages: Vec<Value> = Vec::new();
 
@@ -234,7 +226,10 @@ fn split_messages_json(
             "tool" => {
                 // For Unreliable / None models that don't support toolResult blocks,
                 // encode as plain text so the model can still follow along.
-                if matches!(caps.tool_use, ToolUseSupport::Unreliable | ToolUseSupport::None) {
+                if matches!(
+                    caps.tool_use,
+                    ToolUseSupport::Unreliable | ToolUseSupport::None
+                ) {
                     converse_messages.push(json!({
                         "role": "user",
                         "content": [{ "text": format!("[Tool Result]: {}", msg.content) }]
@@ -273,10 +268,8 @@ fn split_messages_json(
                     match serde_json::from_str::<Value>(rest) {
                         Ok(tu_json) => {
                             if use_native_block {
-                                let tool_use_id =
-                                    tu_json["id"].as_str().unwrap_or("").to_string();
-                                let name =
-                                    tu_json["name"].as_str().unwrap_or("").to_string();
+                                let tool_use_id = tu_json["id"].as_str().unwrap_or("").to_string();
+                                let name = tu_json["name"].as_str().unwrap_or("").to_string();
                                 let input = tu_json["input"].clone();
                                 converse_messages.push(json!({
                                     "role": "assistant",
@@ -367,7 +360,11 @@ fn parse_converse_json(resp: &Value) -> Result<ChatResponse> {
             let id = tu["toolUseId"].as_str().map(|s| s.to_string());
             let name = tu["name"].as_str().unwrap_or("").to_string();
             let arguments = tu["input"].clone();
-            tool_calls.push(ToolCall { id, name, arguments });
+            tool_calls.push(ToolCall {
+                id,
+                name,
+                arguments,
+            });
         }
         // reasoningContent and other blocks are intentionally ignored
     }
@@ -378,7 +375,11 @@ fn parse_converse_json(resp: &Value) -> Result<ChatResponse> {
             content: text_content,
             tool_call_id: None,
         },
-        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
         done: true,
     })
 }

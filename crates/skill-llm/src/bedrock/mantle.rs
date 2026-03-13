@@ -97,11 +97,23 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
         }
         let b0 = lookup[chunk[0] as usize];
         let b1 = lookup[chunk[1] as usize];
-        let b2 = if chunk[2] == b'=' { 0 } else { lookup[chunk[2] as usize] };
-        let b3 = if chunk[3] == b'=' { 0 } else { lookup[chunk[3] as usize] };
+        let b2 = if chunk[2] == b'=' {
+            0
+        } else {
+            lookup[chunk[2] as usize]
+        };
+        let b3 = if chunk[3] == b'=' {
+            0
+        } else {
+            lookup[chunk[3] as usize]
+        };
         out.push((b0 << 2) | (b1 >> 4));
-        if chunk[2] != b'=' { out.push((b1 << 4) | (b2 >> 2)); }
-        if chunk[3] != b'=' { out.push((b2 << 6) | b3); }
+        if chunk[2] != b'=' {
+            out.push((b1 << 4) | (b2 >> 2));
+        }
+        if chunk[3] != b'=' {
+            out.push((b2 << 6) | b3);
+        }
     }
     Ok(out)
 }
@@ -365,7 +377,11 @@ fn parse_openai_response(chat_resp: serde_json::Value) -> Result<ChatResponse> {
                 })
             })
             .collect();
-        if calls.is_empty() { None } else { Some(calls) }
+        if calls.is_empty() {
+            None
+        } else {
+            Some(calls)
+        }
     } else {
         None
     };

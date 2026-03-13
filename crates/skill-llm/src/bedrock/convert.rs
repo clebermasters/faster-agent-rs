@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use aws_sdk_bedrockruntime::types::{
-    ContentBlock, ConversationRole, Message as BedrockMessage, SystemContentBlock,
-    Tool, ToolConfiguration, ToolInputSchema, ToolResultBlock, ToolResultContentBlock,
-    ToolSpecification, ToolUseBlock,
+    ContentBlock, ConversationRole, Message as BedrockMessage, SystemContentBlock, Tool,
+    ToolConfiguration, ToolInputSchema, ToolResultBlock, ToolResultContentBlock, ToolSpecification,
+    ToolUseBlock,
 };
 use aws_smithy_types::Document;
 use serde_json::Value;
@@ -54,11 +54,11 @@ pub fn split_messages(
             "tool" => {
                 // For Unreliable / None models: encode as plain text — they do
                 // not support `toolResult` blocks in conversation history.
-                if matches!(caps.tool_use, ToolUseSupport::Unreliable | ToolUseSupport::None) {
-                    let text = format!(
-                        "[Tool Result]: {}",
-                        msg.content
-                    );
+                if matches!(
+                    caps.tool_use,
+                    ToolUseSupport::Unreliable | ToolUseSupport::None
+                ) {
+                    let text = format!("[Tool Result]: {}", msg.content);
                     converse_messages.push(
                         BedrockMessage::builder()
                             .role(ConversationRole::User)
@@ -110,12 +110,9 @@ pub fn split_messages(
                     match serde_json::from_str::<Value>(rest) {
                         Ok(tu_json) => {
                             if use_native_block {
-                                let tool_use_id =
-                                    tu_json["id"].as_str().unwrap_or("").to_string();
-                                let name =
-                                    tu_json["name"].as_str().unwrap_or("").to_string();
-                                let input_doc =
-                                    json_value_to_document(tu_json["input"].clone());
+                                let tool_use_id = tu_json["id"].as_str().unwrap_or("").to_string();
+                                let name = tu_json["name"].as_str().unwrap_or("").to_string();
+                                let input_doc = json_value_to_document(tu_json["input"].clone());
                                 let tu_block = ToolUseBlock::builder()
                                     .tool_use_id(&tool_use_id)
                                     .name(&name)
@@ -172,7 +169,10 @@ pub fn split_messages(
             }
 
             other => {
-                warn!("Bedrock convert: unknown message role '{}' — skipping", other);
+                warn!(
+                    "Bedrock convert: unknown message role '{}' — skipping",
+                    other
+                );
             }
         }
     }
@@ -279,15 +279,11 @@ pub fn json_value_to_document(value: Value) -> Document {
             } else if let Some(u) = n.as_u64() {
                 Document::Number(aws_smithy_types::Number::PosInt(u))
             } else {
-                Document::Number(aws_smithy_types::Number::Float(
-                    n.as_f64().unwrap_or(0.0),
-                ))
+                Document::Number(aws_smithy_types::Number::Float(n.as_f64().unwrap_or(0.0)))
             }
         }
         Value::String(s) => Document::String(s),
-        Value::Array(arr) => {
-            Document::Array(arr.into_iter().map(json_value_to_document).collect())
-        }
+        Value::Array(arr) => Document::Array(arr.into_iter().map(json_value_to_document).collect()),
         Value::Object(map) => Document::Object(
             map.into_iter()
                 .map(|(k, v)| (k, json_value_to_document(v)))
@@ -304,16 +300,12 @@ pub fn document_to_json_value(doc: Document) -> Value {
         Document::Number(n) => match n {
             aws_smithy_types::Number::PosInt(u) => Value::Number(u.into()),
             aws_smithy_types::Number::NegInt(i) => Value::Number(i.into()),
-            aws_smithy_types::Number::Float(f) => {
-                serde_json::Number::from_f64(f)
-                    .map(Value::Number)
-                    .unwrap_or(Value::Null)
-            }
+            aws_smithy_types::Number::Float(f) => serde_json::Number::from_f64(f)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
         },
         Document::String(s) => Value::String(s),
-        Document::Array(arr) => {
-            Value::Array(arr.into_iter().map(document_to_json_value).collect())
-        }
+        Document::Array(arr) => Value::Array(arr.into_iter().map(document_to_json_value).collect()),
         Document::Object(map) => Value::Object(
             map.into_iter()
                 .map(|(k, v)| (k, document_to_json_value(v)))

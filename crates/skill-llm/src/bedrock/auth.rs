@@ -51,20 +51,14 @@ pub enum BedrockAuth {
     /// no SigV4 required). Works with all Bedrock model families.
     ///
     /// Env var: `BEDROCK_API_KEY`
-    BedrockApiKey {
-        api_key: String,
-        region: String,
-    },
+    BedrockApiKey { api_key: String, region: String },
 }
 
 /// Build an `aws_config::SdkConfig` from the given auth variant.
 ///
 /// `BedrockApiKey` must **not** be passed here — the factory in `mod.rs`
 /// intercepts it before calling this function.
-pub async fn build_aws_config(
-    auth: BedrockAuth,
-    region: &str,
-) -> Result<aws_config::SdkConfig> {
+pub async fn build_aws_config(auth: BedrockAuth, region: &str) -> Result<aws_config::SdkConfig> {
     let region_val = Region::new(region.to_string());
 
     match auth {
@@ -135,10 +129,7 @@ pub async fn build_aws_config(
                 req = req.external_id(ext_id);
             }
 
-            let resp = req
-                .send()
-                .await
-                .context("STS AssumeRole failed")?;
+            let resp = req.send().await.context("STS AssumeRole failed")?;
 
             // 4. Extract the temporary credentials.
             let c = resp
