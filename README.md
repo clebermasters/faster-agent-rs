@@ -1,6 +1,6 @@
 <div align="center">
   <h1>🚀 Skill Agent</h1>
-  <p><strong>An autonomous AI agent that discovers and executes skills using semantic search and LLM tool chaining. Built with Rust.</strong></p>
+  <p><strong>An autonomous AI agent that discovers and executes skills using LLM tool chaining. Built with Rust.</strong></p>
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![Rust](https://github.com/clebermasters/faster-agent-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/clebermasters/faster-agent-rs/actions/workflows/ci.yml)
@@ -8,15 +8,16 @@
 
 <br/>
 
-Skill Agent empowers your workflows by autonomously determining what needs to be done. It discovers capabilities (skills) from the filesystem using vector embeddings and seamlessly chains tools together to complete multi-step tasks.
+Skill Agent empowers your workflows by autonomously determining what needs to be done. It loads capabilities (skills) from the filesystem and makes them available to the LLM via a lightweight metadata catalog — no vector embeddings required for the agent to run.
 
 ## 🌟 Key Features
 
-- **🧠 Semantic Skill Discovery**: Finds the right skills for the job using natural language queries and vector search.
+- **📋 Skill Catalog in System Prompt**: All skills are described to the LLM via a lightweight metadata catalog (id, name, description, triggers). The agent picks the right skill at any point during a task — no upfront filtering.
 - **🔗 Autonomous Tool Chaining**: An intelligent LLM loop automatically calls multiple tools sequentially to resolve complex tasks.
 - **💬 Conversational Memory**: Retains conversation history within each session for continuous context.
 - **🤖 Multi-LLM Support**: Works out-of-the-box with MiniMax, Ollama, and **AWS Bedrock** (Claude, Nova, MiniMax M2.1, ZAI GLM-4.7, and more).
 - **🛠️ Extensible Tooling**: Ships with built-in tools (`bash`, `read`, `write`) and supports custom file-based skills and the Model Context Protocol (MCP).
+- **⚡ Zero Embedding Overhead**: The `agent` command needs only the SKILL.md frontmatter — no Ollama, no SQLite DB, no indexing step.
 
 ---
 
@@ -29,14 +30,33 @@ skill-agent/
 ├── crates/
 │   ├── skill-core/         # Core data types and configuration
 │   ├── skill-registry/     # Loads and parses file-based skills (SKILL.md)
-│   ├── skill-embeddings/   # Local vector embeddings generation (via Ollama)
-│   ├── skill-discovery/    # Semantic and keyword skill search engine
+│   ├── skill-embeddings/   # Vector embeddings via Ollama (index/discover only)
+│   ├── skill-discovery/    # Semantic and keyword skill search (index/discover only)
 │   ├── skill-executor/     # Secure execution of skill scripts
-│   ├── skill-tools/        # Tool abstraction layer (bash, read, write)
+│   ├── skill-tools/        # Tool abstraction layer (bash, read, write, run_skill)
 │   ├── skill-llm/          # LLM client integrations & Agent execution loops
 │   ├── skill-mcp/          # Model Context Protocol integration
 │   └── skill-agent/        # The main CLI entry point
 └── skills/                 # Directory containing custom skill definitions
+```
+
+### How Skills Reach the LLM
+
+```
+Startup:  SKILL.md files → parse frontmatter → in-memory registry
+                                                        │
+                                          ┌─────────────▼──────────────┐
+                                          │  System Prompt              │
+                                          │  SKILL CATALOG:             │
+                                          │  - web-search: Search ...   │
+                                          │  - summarize: Summarize ... │
+                                          └─────────────┬──────────────┘
+                                                        │
+                              LLM sees catalog, picks skill_id
+                                                        │
+                                          run_skill(skill_id, input)
+                                                        │
+                                          Execute script on demand
 ```
 
 ---
@@ -46,7 +66,8 @@ skill-agent/
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) (edition 2021)
-- [Ollama](https://ollama.com/) (For local embeddings and optional local LLM)
+- An LLM API key (MiniMax, AWS Bedrock, or a local Ollama model)
+- [Ollama](https://ollama.com/) — **only needed** for the `index` and `discover` subcommands
 
 ### Installation
 
@@ -60,37 +81,74 @@ cargo build --release
 
 ### Configuration
 
-Create a `.env` file in the root directory to configure your providers:
+Create a `.env` file in the root directory:
 
 ```bash
-# MiniMax (Recommended primary LLM for optimal reasoning)
+# LLM Provider (choose one)
 MINIMAX_API_KEY=your-minimax-api-key
 
-# Ollama (Required for vector embeddings; optional for LLM)
+# Ollama — only needed for 'index' and 'discover' subcommands
 OLLAMA_URL=http://localhost:11434
 EMBEDDING_MODEL=nomic-embed-text
 ```
-
-*Note: Ensure Ollama is running (`ollama serve`) and the embedding model is pulled (`ollama pull nomic-embed-text`).*
 
 ---
 
 ## 🎮 Usage
 
-### Interactive Agent Mode
+### Subcommands
 
-Start a continuous conversational session:
+| Subcommand | Needs Ollama? | Description |
+|---|---|---|
+| `agent` | No | Run the LLM agent with skill catalog |
+| `list` | No | List all available skills |
+| `run` | No | Execute a specific skill directly |
+| `index` | **Yes** | Build the vector embedding database |
+| `discover` | **Yes** | Semantic search over indexed skills |
+
+### Agent Mode
+
+Start an interactive session:
 
 ```bash
-cargo run --release -- agent
+cargo run --release -- agent -i
 ```
 
-### Single Command Execution
-
-Run a specific, one-off task:
+Run a one-off task:
 
 ```bash
 cargo run --release -- agent "scrape https://example.com and save the content to output.html"
+```
+
+### List Skills
+
+```bash
+cargo run --release -- list
+```
+
+### Run a Skill Directly
+
+```bash
+cargo run --release -- run web-search --input "latest Rust releases"
+```
+
+### Index Skills (Optional — for `discover` only)
+
+Only needed if you want to use the `discover` subcommand for semantic search:
+
+```bash
+# Ensure Ollama is running and the model is pulled
+ollama pull nomic-embed-text
+
+cargo run --release -- index
+```
+
+### Discover Skills (Optional)
+
+Semantic search over your indexed skill library:
+
+```bash
+cargo run --release -- discover "summarize a PDF document"
 ```
 
 ### Advanced CLI Options
@@ -98,16 +156,17 @@ cargo run --release -- agent "scrape https://example.com and save the content to
 ```bash
 cargo run --release -- --help
 
-# Useful flags:
-#   --llm-provider <PROVIDER>  Set to 'minimax', 'ollama', or 'bedrock' (default: minimax)
-#   --llm-model <MODEL>        Specify the LLM model name
-#   -v, --verbose              Enable debug-level logging
-#   --streaming                Enable streaming output for the agent
+# Key flags:
+#   --llm-provider <PROVIDER>  'minimax', 'ollama', or 'bedrock' (default: minimax)
+#   --llm-model <MODEL>        LLM model name
+#   --skills-dir <PATH>        Skills directory (default: ./skills)
+#   -v, --verbose              Debug-level logging
+#   --streaming                Streaming output
 #
-# Bedrock-specific flags (when --llm-provider bedrock):
-#   --bedrock-auth <MODE>      Auth mode: default|static|sts-token|sts-role|api-key
+# Bedrock-specific:
+#   --bedrock-auth <MODE>      default|static|sts-token|sts-role|api-key
 #   --bedrock-region <REGION>  AWS region (default: us-east-1)
-#   --bedrock-api-key <KEY>    Bedrock API Key (for api-key auth)
+#   --bedrock-api-key <KEY>    Bedrock API Key (api-key auth)
 ```
 
 ---
@@ -119,7 +178,7 @@ cargo run --release -- --help
 | `bash` | Execute shell commands safely within the environment. |
 | `read` | Read contents of files from the disk. |
 | `write` | Write or append content to files. |
-| `skill_*` | Dynamically discovered custom skills defined in your workspace. |
+| `run_skill` | Execute any skill by ID. The agent picks from the catalog in its system prompt. |
 
 ### Example Scenarios
 
@@ -141,7 +200,7 @@ Extend the agent's capabilities by adding declarative skills. Create a new direc
 
 ```bash
 skills/my-new-skill/
-├── SKILL.md           # Defines the skill's identity, triggers, and parameters
+├── SKILL.md           # Frontmatter = metadata catalog; body = execution instructions
 └── scripts/
     └── run.sh         # (Optional) Executable logic for the skill
 ```
@@ -161,8 +220,12 @@ capabilities:
 ---
 
 # Web Scraper Skill
-This skill extracts text from websites...
+
+This skill fetches a URL and returns the page content as plain text.
+Pass the target URL as the input.
 ```
+
+The **frontmatter** (`name`, `description`, `trigger`) is what appears in the skill catalog shown to the LLM. The **body** contains the full instructions and is only read when the skill is actually executed via `run_skill`.
 
 ---
 
@@ -171,17 +234,16 @@ This skill extracts text from websites...
 | Provider | `--llm-provider` | Description |
 |---|---|---|
 | **MiniMax** | `minimax` | Default. Cloud API, strong reasoning and coding. |
-| **Ollama** | `ollama` | Local inference. Also used for vector embeddings. |
-| **AWS Bedrock** | `bedrock` | Access Claude, Nova, MiniMax M2.1, ZAI GLM-4.7 and more via Amazon Bedrock. Supports IAM, STS, and Bedrock API Key auth. |
+| **Ollama** | `ollama` | Local inference. Also used for vector embeddings (index/discover). |
+| **AWS Bedrock** | `bedrock` | Access Claude, Nova, MiniMax M2.1, ZAI GLM-4.7 and more. Supports IAM, STS, and Bedrock API Key auth. |
 
-For full AWS Bedrock setup instructions, authentication modes, model-specific behaviour, and troubleshooting see:
+For full AWS Bedrock setup instructions see:
 
 **[docs/providers/bedrock.md](docs/providers/bedrock.md)**
 
 ### Tested Models from Bedrock:
-global.anthropic.claude-haiku-4-5-20251001-v1:0
-global.anthropic.claude-haiku-4-5-20251001-v1:0
-global.amazon.nova-2-lite-v1:0
+- `global.anthropic.claude-haiku-4-5-20251001-v1:0`
+- `global.amazon.nova-2-lite-v1:0`
 
 ---
 

@@ -3,8 +3,6 @@ mod agents;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use skill_core::{Config, SkillQuery};
-use skill_discovery::SkillDiscoveryEngine;
-use skill_embeddings::EmbeddingService;
 use skill_executor::{ExecutionContext, SkillExecutor};
 use skill_llm::{Agent, BedrockAuth, MiniMaxClient, OllamaClient, StreamingAgent};
 use skill_mcp::McpRegistry;
@@ -26,15 +24,6 @@ struct Cli {
     #[arg(short, long, default_value = "./skills")]
     skills_dir: PathBuf,
 
-    #[arg(long, default_value = "ollama")]
-    provider: String,
-
-    #[arg(long, env = "OLLAMA_URL", default_value = "http://localhost:11434")]
-    ollama_url: String,
-
-    #[arg(long, env = "EMBEDDING_MODEL", default_value = "nomic-embed-text")]
-    ollama_model: String,
-
     #[arg(long, env = "DEFAULT_MODEL", default_value = "MiniMax-Text-01")]
     llm_model: String,
 
@@ -49,9 +38,6 @@ struct Cli {
 
     #[arg(long)]
     minimax_api_key: Option<String>,
-
-    #[arg(short, long, default_value = "./skill-agent.db")]
-    db_path: PathBuf,
 
     #[arg(short, long)]
     verbose: bool,
@@ -117,10 +103,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Index all skills in the skills directory
-    Index,
+    /// Index all skills into the vector embedding database (requires Ollama)
+    Index {
+        /// Ollama base URL for generating embeddings
+        #[arg(long, env = "OLLAMA_URL", default_value = "http://localhost:11434")]
+        ollama_url: String,
 
-    /// Discover skills for a task
+        /// Embedding model to use
+        #[arg(long, env = "EMBEDDING_MODEL", default_value = "nomic-embed-text")]
+        embedding_model: String,
+
+        /// Path to the SQLite embedding database
+        #[arg(long, default_value = "./skill-agent.db")]
+        db_path: PathBuf,
+    },
+
+    /// Discover skills for a task using semantic search (requires Ollama + indexed DB)
     Discover {
         /// The task description
         task: String,
@@ -132,9 +130,21 @@ enum Commands {
         /// Minimum match threshold (0.0-1.0)
         #[arg(short, long, default_value = "0.1")]
         threshold: f64,
+
+        /// Ollama base URL for generating embeddings
+        #[arg(long, env = "OLLAMA_URL", default_value = "http://localhost:11434")]
+        ollama_url: String,
+
+        /// Embedding model to use
+        #[arg(long, env = "EMBEDDING_MODEL", default_value = "nomic-embed-text")]
+        embedding_model: String,
+
+        /// Path to the SQLite embedding database
+        #[arg(long, default_value = "./skill-agent.db")]
+        db_path: PathBuf,
     },
 
-    /// Execute a specific skill
+    /// Execute a specific skill directly by ID
     Run {
         /// The skill ID to run
         skill_id: String,
@@ -178,46 +188,63 @@ async fn main() -> anyhow::Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    let config = Config {
-        skills_dir: cli.skills_dir.clone(),
-        embedding_model: cli.ollama_model.clone(),
-        ollama_url: cli.ollama_url.clone(),
-        db_path: cli.db_path.clone(),
-        ..Default::default()
-    };
-
-    let embeddings = match cli.provider.as_str() {
-        "ollama" => {
-            info!("Using Ollama provider");
-            EmbeddingService::new_ollama(
-                config.ollama_url.clone(),
-                config.embedding_model.clone(),
-                config.db_path.clone(),
-            )
-        }
-        other => {
-            anyhow::bail!("Unknown provider: {}. Only 'ollama' is supported.", other)
-        }
-    };
-
-    let registry = SkillRegistry::new(config.skills_dir.clone());
-    let mut engine = SkillDiscoveryEngine::new(registry, embeddings);
-
     match cli.command {
-        Commands::Index => {
+        // ----------------------------------------------------------------
+        // Index — builds vector embeddings (needs Ollama)
+        // ----------------------------------------------------------------
+        Commands::Index {
+            ollama_url,
+            embedding_model,
+            db_path,
+        } => {
+            use skill_discovery::SkillDiscoveryEngine;
+            use skill_embeddings::EmbeddingService;
+
+            let config = Config {
+                skills_dir: cli.skills_dir.clone(),
+                ollama_url: ollama_url.clone(),
+                embedding_model: embedding_model.clone(),
+                db_path: db_path.clone(),
+                ..Default::default()
+            };
+
             info!("Indexing skills from {:?}", config.skills_dir);
+            let embeddings = EmbeddingService::new_ollama(ollama_url, embedding_model, db_path);
+            let registry = SkillRegistry::new(config.skills_dir.clone());
+            let mut engine = SkillDiscoveryEngine::new(registry, embeddings);
 
             engine.registry_mut().load().await?;
             engine.index_all().await?;
 
-            info!("Indexed {} skills", engine.registry().count());
+            println!("Indexed {} skills.", engine.registry().count());
         }
 
+        // ----------------------------------------------------------------
+        // Discover — semantic search (needs Ollama + indexed DB)
+        // ----------------------------------------------------------------
         Commands::Discover {
             task,
             limit,
             threshold,
+            ollama_url,
+            embedding_model,
+            db_path,
         } => {
+            use skill_discovery::SkillDiscoveryEngine;
+            use skill_embeddings::EmbeddingService;
+
+            let config = Config {
+                skills_dir: cli.skills_dir.clone(),
+                ollama_url: ollama_url.clone(),
+                embedding_model: embedding_model.clone(),
+                db_path: db_path.clone(),
+                ..Default::default()
+            };
+
+            let embeddings = EmbeddingService::new_ollama(ollama_url, embedding_model, db_path);
+            let registry = SkillRegistry::new(config.skills_dir.clone());
+            let mut engine = SkillDiscoveryEngine::new(registry, embeddings);
+
             engine.registry_mut().load().await?;
             engine.index_all().await?;
 
@@ -243,16 +270,19 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Run — execute a skill directly, no LLM needed
+        // ----------------------------------------------------------------
         Commands::Run { skill_id, input } => {
-            engine.registry_mut().load().await?;
+            let mut registry = SkillRegistry::new(cli.skills_dir.clone());
+            registry.load().await?;
 
-            let skill = engine
-                .registry()
+            let skill = registry
                 .get(&skill_id)
                 .ok_or_else(|| anyhow::anyhow!("Skill not found: {}", skill_id))?
                 .clone();
 
-            let executor = SkillExecutor::new(config.skills_dir);
+            let executor = SkillExecutor::new(cli.skills_dir.clone());
             let context = ExecutionContext::default();
 
             let result = executor
@@ -266,10 +296,14 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        // ----------------------------------------------------------------
+        // List — print skill metadata, no embeddings needed
+        // ----------------------------------------------------------------
         Commands::List => {
-            engine.registry_mut().load().await?;
+            let mut registry = SkillRegistry::new(cli.skills_dir.clone());
+            registry.load().await?;
 
-            let skills = engine.registry().get_all();
+            let skills = registry.get_all();
 
             println!("\n=== Available Skills ({}) ===\n", skills.len());
             for skill in skills {
@@ -284,9 +318,12 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Agent — LLM agent loop, no embeddings needed
+        // ----------------------------------------------------------------
         Commands::Agent { task, interactive } => {
-            // Load skill metadata only (no embedding indexing needed)
-            engine.registry_mut().load().await?;
+            let mut registry = SkillRegistry::new(cli.skills_dir.clone());
+            registry.load().await?;
 
             // Load MCP servers (lazy - will connect on first use)
             let mut mcp_registry = McpRegistry::new(Duration::from_secs(cli.mcp_timeout));
@@ -333,16 +370,15 @@ async fn main() -> anyhow::Result<()> {
             let mut tools = ToolRegistry::new();
             tools.register(ToolBox::Bash(BashTool::new()));
             tools.register(ToolBox::Read(ReadTool::new(
-                config.skills_dir.clone().to_string_lossy().to_string(),
+                cli.skills_dir.to_string_lossy().to_string(),
             )));
             tools.register(ToolBox::Write(WriteTool::new(
-                config.skills_dir.clone().to_string_lossy().to_string(),
+                cli.skills_dir.to_string_lossy().to_string(),
             )));
 
-            // Register a single SkillTool holding all skills (metadata in system
-            // prompt, full instructions read on demand during execution)
-            let all_skills = engine.registry().get_all().into_iter().cloned().collect();
-            let skill_tool = SkillTool::new(all_skills, config.skills_dir.clone());
+            // Single SkillTool holds all skills; catalog injected into system prompt
+            let all_skills = registry.get_all().into_iter().cloned().collect();
+            let skill_tool = SkillTool::new(all_skills, cli.skills_dir.clone());
             info!("Registered {} skills via run_skill tool", skill_tool.skill_count());
             tools.register(ToolBox::Skill(skill_tool));
 
@@ -361,11 +397,10 @@ async fn main() -> anyhow::Result<()> {
                     Box::new(MiniMaxClient::new(url, api_key, cli.llm_model.clone()))
                 }
                 "ollama" => {
-                    info!("Using Ollama provider: {}", cli.ollama_url);
-                    Box::new(OllamaClient::new(
-                        cli.ollama_url.clone(),
-                        cli.llm_model.clone(),
-                    ))
+                    let ollama_url = std::env::var("OLLAMA_URL")
+                        .unwrap_or_else(|_| "http://localhost:11434".to_string());
+                    info!("Using Ollama provider: {}", ollama_url);
+                    Box::new(OllamaClient::new(ollama_url, cli.llm_model.clone()))
                 }
                 "bedrock" => {
                     let auth = match cli.bedrock_auth.as_str() {
@@ -431,10 +466,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
 
-            // Convert mcp_registry to Arc for sharing
             let mcp_registry = std::sync::Arc::new(mcp_registry);
-
-            // Add extra system prompt if provided
             let extra_prompt = extra_system_prompt.clone();
 
             if cli.streaming {
@@ -447,8 +479,6 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(prompt) = extra_prompt {
                     agent = agent.with_extra_system_prompt(prompt);
                 }
-
-                let agent = agent;
 
                 println!(
                     "\n{}",
@@ -469,14 +499,10 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut input = String::new();
                         let bytes = io::stdin().read_line(&mut input)?;
-                        if bytes == 0 {
-                            break;
-                        }
+                        if bytes == 0 { break; }
 
                         let input = input.trim();
-                        if input == "quit" || input == "exit" {
-                            break;
-                        }
+                        if input == "quit" || input == "exit" { break; }
 
                         if !input.is_empty() {
                             let result = agent.run(input).await?;
@@ -513,14 +539,10 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut input = String::new();
                         let bytes = io::stdin().read_line(&mut input)?;
-                        if bytes == 0 {
-                            break;
-                        }
+                        if bytes == 0 { break; }
 
                         let input = input.trim();
-                        if input == "quit" || input == "exit" {
-                            break;
-                        }
+                        if input == "quit" || input == "exit" { break; }
 
                         if !input.is_empty() {
                             let result = agent.run(input).await?;
@@ -531,7 +553,22 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        // ----------------------------------------------------------------
+        // SystemPrompt — discovery engine system prompt (needs embeddings)
+        // ----------------------------------------------------------------
         Commands::SystemPrompt => {
+            use skill_discovery::SkillDiscoveryEngine;
+            use skill_embeddings::EmbeddingService;
+
+            let ollama_url = std::env::var("OLLAMA_URL")
+                .unwrap_or_else(|_| "http://localhost:11434".to_string());
+            let embedding_model = std::env::var("EMBEDDING_MODEL")
+                .unwrap_or_else(|_| "nomic-embed-text".to_string());
+            let db_path = PathBuf::from("./skill-agent.db");
+
+            let embeddings = EmbeddingService::new_ollama(ollama_url, embedding_model, db_path);
+            let registry = SkillRegistry::new(cli.skills_dir.clone());
+            let engine = SkillDiscoveryEngine::new(registry, embeddings);
             println!("{}", engine.get_system_prompt());
         }
     }
