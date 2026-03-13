@@ -13,12 +13,13 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 authors = ["Cleber Rodrigues <clebermasters@example.com>"] # Update as needed
 repository = "https://github.com/clebermasters/faster-agent-rs"
 description = "Autonomous skill discovery agent with LLM tool chaining, powered by Rust."
+readme = "README.md"
 
 [workspace.dependencies]
 tokio = { version = "1.40", features = ["full"] }

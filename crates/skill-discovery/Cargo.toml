@@ -2,15 +2,16 @@
 name = "skill-discovery"
 version.workspace = true
 description.workspace = true
+readme = "README.md"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-skill-core = { path = "../skill-core", version = "0.2.0" }
-skill-registry = { path = "../skill-registry", version = "0.2.0" }
-skill-embeddings = { path = "../skill-embeddings", version = "0.2.0" }
+skill-core = { path = "../skill-core", version = "0.2.1" }
+skill-registry = { path = "../skill-registry", version = "0.2.1" }
+skill-embeddings = { path = "../skill-embeddings", version = "0.2.1" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

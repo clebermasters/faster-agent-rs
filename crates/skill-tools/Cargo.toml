@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Tools and capability execution for the Skill Agent framework"
+readme = "README.md"
 
 [dependencies]
 anyhow = { workspace = true }
@@ -15,5 +16,5 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
-skill-core = { path = "../skill-core", version = "0.2.0" }
-skill-executor = { path = "../skill-executor", version = "0.2.0" }
+skill-core = { path = "../skill-core", version = "0.2.1" }
+skill-executor = { path = "../skill-executor", version = "0.2.1" }
