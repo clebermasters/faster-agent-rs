@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Usage: ./ask "Build me an HTML page with latest AI news"
+#        ./ask -i "Let's chat"          (interactive mode)
+#        ./ask --no-stream "One-shot"   (disable streaming)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Defaults
+INTERACTIVE=false
+STREAMING=true
+
+# Parse flags
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -i|--interactive) INTERACTIVE=true; shift ;;
+        --no-stream)      STREAMING=false;  shift ;;
+        -h|--help)
+            echo "Usage: $(basename "$0") [OPTIONS] \"your prompt\""
+            echo ""
+            echo "Options:"
+            echo "  -i, --interactive   Keep session open for follow-up questions"
+            echo "  --no-stream         Disable streaming output"
+            echo "  -h, --help          Show this help"
+            exit 0
+            ;;
+        *) POSITIONAL+=("$1"); shift ;;
+    esac
+done
+
+PROMPT="${POSITIONAL[*]:-}"
+
+if [[ -z "$PROMPT" && "$INTERACTIVE" == "false" ]]; then
+    echo "Error: provide a prompt or use -i for interactive mode"
+    echo "Usage: $(basename "$0") \"your prompt\""
+    exit 1
+fi
+
+ARGS=(--streaming --llm-provider openai --llm-model claude-opus-4-6)
+
+if [[ "$STREAMING" == "false" ]]; then
+    ARGS=(--llm-provider openai --llm-model claude-opus-4-6)
+fi
+
+if [[ "$INTERACTIVE" == "true" ]]; then
+    ARGS+=(agent "$PROMPT" -i)
+else
+    ARGS+=(agent "$PROMPT")
+fi
+
+cd "$SCRIPT_DIR"
+exec cargo run --quiet -- "${ARGS[@]}"

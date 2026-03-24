@@ -208,6 +208,9 @@ impl LLMClient for BedrockConverseClient {
                                             tool_calls: None,
                                             done: false,
                                             done_reason: None,
+                                            thinking: None,
+                                            tool_use: None,
+                                            tool_result: None,
                                         });
                                     }
                                     Some(ContentBlockDelta::ToolUse(tu)) => {
@@ -246,6 +249,9 @@ impl LLMClient for BedrockConverseClient {
                                         }]),
                                         done: false,
                                         done_reason: None,
+                                        thinking: None,
+                                        tool_use: None,
+                                        tool_result: None,
                                     });
                                     tool_input_buf.clear();
                                 }
@@ -260,6 +266,9 @@ impl LLMClient for BedrockConverseClient {
                                     tool_calls: None,
                                     done: true,
                                     done_reason: reason,
+                                    thinking: None,
+                                    tool_use: None,
+                                    tool_result: None,
                                 });
                                 return;
                             }

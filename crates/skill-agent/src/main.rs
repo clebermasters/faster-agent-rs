@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use skill_core::{Config, SkillQuery};
 use skill_executor::{ExecutionContext, SkillExecutor};
-use skill_llm::{Agent, BedrockAuth, MiniMaxClient, OllamaClient, StreamingAgent};
+use skill_llm::{Agent, BedrockAuth, MiniMaxClient, OllamaClient, OpenAIClient, StreamingAgent};
 use skill_mcp::McpRegistry;
 use skill_registry::SkillRegistry;
 use skill_tools::{BashTool, ReadTool, SkillTool, ToolBox, ToolRegistry, WriteTool};
@@ -44,6 +44,17 @@ struct Cli {
 
     #[arg(long, default_value = "false")]
     streaming: bool,
+
+    // ------------------------------------------------------------------
+    // OpenAI-compatible provider (--llm-provider openai)
+    // ------------------------------------------------------------------
+    /// Base URL for any OpenAI-compatible API (e.g. http://localhost:8000)
+    #[arg(long, env = "OPENAI_BASE_URL")]
+    openai_url: Option<String>,
+
+    /// API key for the OpenAI-compatible endpoint
+    #[arg(long, env = "OPENAI_API_KEY")]
+    openai_api_key: Option<String>,
 
     #[arg(long, default_value = "./mcp.json")]
     mcp_config: PathBuf,
@@ -398,6 +409,16 @@ async fn main() -> anyhow::Result<()> {
                     info!("Using MiniMax provider: {}", url);
                     Box::new(MiniMaxClient::new(url, api_key, cli.llm_model.clone()))
                 }
+                "openai" => {
+                    let url = cli
+                        .openai_url
+                        .unwrap_or_else(|| "http://localhost:8000".to_string());
+                    let api_key = cli
+                        .openai_api_key
+                        .unwrap_or_else(|| "no-key".to_string());
+                    info!("Using OpenAI-compatible provider: {}", url);
+                    Box::new(OpenAIClient::new(url, api_key, cli.llm_model.clone()))
+                }
                 "ollama" => {
                     let ollama_url = std::env::var("OLLAMA_URL")
                         .unwrap_or_else(|_| "http://localhost:11434".to_string());
@@ -462,7 +483,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 other => {
                     anyhow::bail!(
-                        "Unknown LLM provider: {}. Use 'minimax', 'ollama', or 'bedrock'.",
+                        "Unknown LLM provider: {}. Use 'openai', 'minimax', 'ollama', or 'bedrock'.",
                         other
                     )
                 }

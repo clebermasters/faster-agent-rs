@@ -250,6 +250,7 @@ pub fn parse_converse_output(
             Some(tool_calls)
         },
         done: true,
+        thinking: None,
     })
 }
 

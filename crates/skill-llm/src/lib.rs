@@ -37,6 +37,23 @@ pub struct ChatResponse {
     pub message: Message,
     pub tool_calls: Option<Vec<ToolCall>>,
     pub done: bool,
+    #[serde(default)]
+    pub thinking: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolUseEvent {
+    pub name: String,
+    pub input: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolResultEvent {
+    pub name: String,
+    #[serde(alias = "output")]
+    pub content: String,
+    #[serde(default)]
+    pub is_error: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +62,12 @@ pub struct ChatChunk {
     pub tool_calls: Option<Vec<ToolCall>>,
     pub done: bool,
     pub done_reason: Option<String>,
+    #[serde(default)]
+    pub thinking: Option<String>,
+    #[serde(default)]
+    pub tool_use: Option<ToolUseEvent>,
+    #[serde(default)]
+    pub tool_result: Option<ToolResultEvent>,
 }
 
 pub trait LLMClient: Send + Sync {
@@ -193,6 +216,7 @@ impl LLMClient for MiniMaxClient {
                 },
                 tool_calls,
                 done: true,
+                thinking: None,
             })
         })
     }
@@ -317,6 +341,9 @@ impl LLMClient for MiniMaxClient {
                             tool_calls: None,
                             done: true,
                             done_reason: Some("stop".to_string()),
+                            thinking: None,
+                            tool_use: None,
+                            tool_result: None,
                         };
                         return;
                     }
@@ -379,6 +406,9 @@ impl LLMClient for MiniMaxClient {
                                 tool_calls,
                                 done,
                                 done_reason,
+                                thinking: None,
+                                tool_use: None,
+                                tool_result: None,
                             };
                         }
                         Err(_) => continue,
@@ -387,6 +417,387 @@ impl LLMClient for MiniMaxClient {
             }
 
             info!("[MINIMAX] Stream ended normally, total bytes: {}", bytes_received);
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI-compatible client (works with any provider exposing /v1/chat/completions)
+// ---------------------------------------------------------------------------
+
+pub struct OpenAIClient {
+    client: Client,
+    base_url: String,
+    api_key: String,
+    model: String,
+}
+
+impl OpenAIClient {
+    pub fn new(base_url: String, api_key: String, model: String) -> Self {
+        Self {
+            client: Client::new(),
+            base_url,
+            api_key,
+            model,
+        }
+    }
+
+    /// Build a tool-calling instruction to PREPEND to the system prompt.
+    /// The wrapper doesn't support OpenAI function calling, so we instruct
+    /// the model to output tool calls in a parseable text format.
+    fn tool_instruction(_tools: &[ToolDefinition]) -> String {
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        format!(
+            "IMPORTANT: The user's project directory is: {}\n\
+             When reading files or running commands, use absolute paths based on this directory.\n\
+             For example, to read Cargo.toml use: {}/Cargo.toml\n\n",
+            cwd, cwd
+        )
+    }
+
+    /// Build the request body for the wrapper.
+    /// When tools are provided, enable CLI tools so the model can execute actions.
+    fn build_request_body(
+        model: &str,
+        messages: &[serde_json::Value],
+        stream: bool,
+        has_tools: bool,
+    ) -> serde_json::Value {
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "stream": stream,
+            "include_thinking": true,
+        });
+        if has_tools {
+            // Enable the wrapper's CLI tools (Bash, Read, Write, etc.)
+            // so the model can execute actions via the Claude CLI.
+            body["enable_tools"] = json!(true);
+        }
+        body
+    }
+
+    /// Extract tool calls from `<tool_call>...</tool_call>` blocks in text.
+    /// Returns (clean_content, tool_calls).
+    fn extract_tool_calls(content: &str) -> (String, Option<Vec<ToolCall>>) {
+        let mut calls = Vec::new();
+        let mut clean = String::new();
+        let mut rest = content;
+
+        while let Some(start) = rest.find("<tool_call>") {
+            clean.push_str(&rest[..start]);
+            let after_tag = &rest[start + "<tool_call>".len()..];
+            if let Some(end) = after_tag.find("</tool_call>") {
+                let json_str = after_tag[..end].trim();
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    let name = val["name"].as_str().unwrap_or("").to_string();
+                    let arguments = val.get("arguments").cloned().unwrap_or(json!({}));
+                    if !name.is_empty() {
+                        calls.push(ToolCall {
+                            id: Some(format!("call_{}", calls.len())),
+                            name,
+                            arguments,
+                        });
+                    }
+                }
+                rest = &after_tag[end + "</tool_call>".len()..];
+            } else {
+                // Unclosed tag — keep as content
+                clean.push_str(&rest[start..]);
+                rest = "";
+                break;
+            }
+        }
+        clean.push_str(rest);
+        let clean = clean.trim().to_string();
+
+        if calls.is_empty() {
+            (clean, None)
+        } else {
+            (clean, Some(calls))
+        }
+    }
+}
+
+impl LLMClient for OpenAIClient {
+    fn chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<ChatResponse>> + Send + '_>> {
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+
+        Box::pin(async move {
+            let has_tools = tools.as_ref().map_or(false, |t| !t.is_empty());
+
+            let messages: Vec<serde_json::Value> = messages
+                .into_iter()
+                .map(|m| {
+                    json!({
+                        "role": m.role,
+                        "content": m.content
+                    })
+                })
+                .collect();
+
+            let body = Self::build_request_body(&model, &messages, false, has_tools);
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            debug!("[OPENAI] Sending chat request to: {}", base_url);
+
+            let mut req = client
+                .post(format!("{}/v1/chat/completions", base_url))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json");
+            if has_tools && !cwd.is_empty() {
+                req = req.header("X-Claude-Add-Dir", &cwd);
+            }
+            let response = req.json(&body).send().await?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                anyhow::bail!("OpenAI API error: {} - {}", status, error_text);
+            }
+
+            let chat_resp: serde_json::Value = response.json().await?;
+
+            let message = chat_resp["choices"][0]["message"].clone();
+            let role = message["role"].as_str().unwrap_or("assistant").to_string();
+            let raw_content = message["content"].as_str().unwrap_or("").to_string();
+            let thinking = message.get("thinking").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+            // Extract tool calls from text content
+            let (content, text_tool_calls) = Self::extract_tool_calls(&raw_content);
+
+            // Prefer native tool_calls, fall back to text-based
+            let tool_calls = if message.get("tool_calls").is_some() {
+                let calls: Vec<ToolCall> = message["tool_calls"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|c| {
+                        let func = c.get("function")?;
+                        Some(ToolCall {
+                            id: c.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            name: func["name"].as_str()?.to_string(),
+                            arguments: func["arguments"].clone(),
+                        })
+                    })
+                    .collect();
+                if calls.is_empty() { text_tool_calls } else { Some(calls) }
+            } else {
+                text_tool_calls
+            };
+
+            Ok(ChatResponse {
+                message: Message {
+                    role,
+                    content,
+                    tool_call_id: None,
+                },
+                tool_calls,
+                done: true,
+                thinking,
+            })
+        })
+    }
+
+    fn chat_streaming(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Pin<Box<dyn Stream<Item = Result<ChatChunk>> + Send + '_>> {
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+
+        Box::pin(async_stream::try_stream! {
+            let has_tools = tools.as_ref().map_or(false, |t| !t.is_empty());
+
+            let messages: Vec<serde_json::Value> = messages
+                .into_iter()
+                .map(|m| {
+                    json!({
+                        "role": m.role,
+                        "content": m.content
+                    })
+                })
+                .collect();
+
+            let body = OpenAIClient::build_request_body(&model, &messages, true, has_tools);
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            debug!("[OPENAI] Sending streaming chat request");
+
+            let mut req = client
+                .post(format!("{}/v1/chat/completions", base_url))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json");
+            if has_tools && !cwd.is_empty() {
+                req = req.header("X-Claude-Add-Dir", &cwd);
+            }
+            let response = req
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| {
+                    error!("[OPENAI] Request error: {}", e);
+                    anyhow::anyhow!("Request error: {}", e)
+                })?;
+
+            let status = response.status();
+            if !status.is_success() {
+                error!("[OPENAI] API error: {}", status);
+                Err(anyhow::anyhow!("OpenAI API error: {}", status))?;
+            }
+
+            info!("[OPENAI] Streaming response started");
+            let mut stream = response.bytes_stream();
+            let mut bytes_received = 0;
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk_bytes = match chunk_result {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        error!("[OPENAI] Stream read error: {}", e);
+                        Err(anyhow::anyhow!("Stream error: {}", e))?;
+                        unreachable!()
+                    }
+                };
+
+                bytes_received += chunk_bytes.len();
+                debug!("[OPENAI] Received {} bytes (total: {})", chunk_bytes.len(), bytes_received);
+
+                if chunk_bytes.is_empty() {
+                    continue;
+                }
+
+                let chunk_str = String::from_utf8_lossy(&chunk_bytes);
+
+                for line in chunk_str.lines() {
+                    let line = line.trim();
+                    if !line.starts_with("data:") {
+                        continue;
+                    }
+
+                    let data = line[5..].trim();
+                    if data.is_empty() {
+                        continue;
+                    }
+
+                    if data == "[DONE]" {
+                        info!("[OPENAI] Received [DONE] signal");
+                        yield ChatChunk {
+                            content: String::new(),
+                            tool_calls: None,
+                            done: true,
+                            done_reason: Some("stop".to_string()),
+                            thinking: None,
+                            tool_use: None,
+                            tool_result: None,
+                        };
+                        return;
+                    }
+
+                    match serde_json::from_str::<serde_json::Value>(data) {
+                        Ok(chat_resp) => {
+                            let delta = chat_resp.get("choices")
+                                .and_then(|c| c.as_array())
+                                .and_then(|c| c.first())
+                                .and_then(|c| c.get("delta"));
+
+                            let content = delta
+                                .and_then(|d| d.get("content"))
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("")
+                                .to_string();
+
+                            let thinking = delta
+                                .and_then(|d| d.get("thinking"))
+                                .and_then(|t| t.as_str())
+                                .map(|s| s.to_string());
+
+                            let tool_calls = delta.and_then(|d| d.get("tool_calls")).and_then(|tc| {
+                                let calls: Vec<ToolCall> = tc
+                                    .as_array()
+                                    .unwrap_or(&vec![])
+                                    .iter()
+                                    .filter_map(|c| {
+                                        let func = c.get("function")?;
+                                        let args = func.get("arguments")?;
+                                        let args_str = args.as_str().unwrap_or("");
+                                        let name = func["name"].as_str().map(|s| s.to_string()).unwrap_or_default();
+                                        let id = c.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                        let arguments = serde_json::Value::String(args_str.to_string());
+                                        Some(ToolCall {
+                                            id,
+                                            name,
+                                            arguments,
+                                        })
+                                    })
+                                    .collect();
+                                if calls.is_empty() {
+                                    None
+                                } else {
+                                    Some(calls)
+                                }
+                            });
+
+                            let tool_use = delta
+                                .and_then(|d| d.get("tool_use"))
+                                .and_then(|tu| {
+                                    Some(ToolUseEvent {
+                                        name: tu.get("name").and_then(|v| v.as_str())?.to_string(),
+                                        input: tu.get("input").cloned().unwrap_or(json!({})),
+                                    })
+                                });
+
+                            let tool_result = delta
+                                .and_then(|d| d.get("tool_result"))
+                                .and_then(|tr| {
+                                    Some(ToolResultEvent {
+                                        name: tr.get("name").and_then(|v| v.as_str()).unwrap_or("tool").to_string(),
+                                        content: tr.get("output").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                        is_error: tr.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false),
+                                    })
+                                });
+
+                            let finish_reason = chat_resp.get("choices")
+                                .and_then(|c| c.as_array())
+                                .and_then(|c| c.first())
+                                .and_then(|c| c.get("finish_reason"))
+                                .and_then(|f| f.as_str());
+
+                            let done = finish_reason.is_some();
+                            let done_reason = finish_reason.map(|s| s.to_string());
+
+                            yield ChatChunk {
+                                content,
+                                tool_calls,
+                                done,
+                                done_reason,
+                                thinking,
+                                tool_use,
+                                tool_result,
+                            };
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+
+            info!("[OPENAI] Stream ended normally, total bytes: {}", bytes_received);
         })
     }
 }
@@ -486,6 +897,7 @@ impl OllamaClient {
             },
             tool_calls,
             done: chat_resp["done"].as_bool().unwrap_or(true),
+            thinking: None,
         })
     }
 
@@ -639,6 +1051,9 @@ impl OllamaClient {
                                 tool_calls,
                                 done,
                                 done_reason,
+                                thinking: None,
+                                tool_use: None,
+                                tool_result: None,
                             };
                         }
                         Err(_) => continue,
@@ -736,6 +1151,7 @@ impl LLMClient for OllamaClient {
                 },
                 tool_calls,
                 done: chat_resp["done"].as_bool().unwrap_or(true),
+                thinking: None,
             })
         })
     }
@@ -1474,8 +1890,59 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                     }
                 };
 
-                info!("[STREAM] Chunk #{}: content_len={}, tool_calls={:?}, done={}, done_reason={:?}", 
-                    chunk_count, chunk.content.len(), chunk.tool_calls.is_some(), chunk.done, chunk.done_reason);
+                info!("[STREAM] Chunk #{}: content_len={}, thinking={}, tool_calls={:?}, done={}, done_reason={:?}",
+                    chunk_count, chunk.content.len(), chunk.thinking.is_some(), chunk.tool_calls.is_some(), chunk.done, chunk.done_reason);
+
+                // Display thinking tokens (dimmed) before content
+                if let Some(ref thinking) = chunk.thinking {
+                    if self.show_thinking && !thinking.is_empty() {
+                        print!("{}", thinking.dimmed());
+                        std::io::Write::flush(&mut std::io::stdout()).ok();
+                    }
+                }
+
+                // Display tool execution events in real-time
+                if let Some(ref tu) = chunk.tool_use {
+                    let args_preview = serde_json::to_string(&tu.input)
+                        .unwrap_or_default();
+                    let args_short = if args_preview.len() > 120 {
+                        format!("{}...", &args_preview[..120])
+                    } else {
+                        args_preview
+                    };
+                    println!(
+                        "\n{} {} {}",
+                        Self::icon("exec"),
+                        Self::tool_name(&tu.name),
+                        args_short.dimmed()
+                    );
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                }
+
+                if let Some(ref tr) = chunk.tool_result {
+                    let preview = if tr.content.len() > 150 {
+                        format!("{}...", &tr.content[..150])
+                    } else {
+                        tr.content.clone()
+                    };
+                    let first_line = preview.lines().next().unwrap_or(&preview);
+                    if tr.is_error {
+                        println!(
+                            "{} {} {}",
+                            Self::icon("error"),
+                            format!("{} failed:", tr.name).bold().red(),
+                            first_line.dimmed()
+                        );
+                    } else {
+                        println!(
+                            "{} {} {}",
+                            Self::icon("success"),
+                            format!("{} →", tr.name).bold().green(),
+                            first_line.dimmed()
+                        );
+                    }
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                }
 
                 if !chunk.content.is_empty() {
                     accumulated_content.push_str(&chunk.content);
@@ -1544,8 +2011,19 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                 s.finish_and_clear();
             }
 
-            info!("[STREAM] Stream consumption complete. Total chunks: {}, accumulated_content: {} chars, final_tool_calls: {:?}, is_done: {}", 
+            info!("[STREAM] Stream consumption complete. Total chunks: {}, accumulated_content: {} chars, final_tool_calls: {:?}, is_done: {}",
                 chunk_count, accumulated_content.len(), final_tool_calls, is_done);
+
+            // Extract text-based tool calls from accumulated content (for providers
+            // that don't support native function calling, e.g. OpenAI wrapper)
+            if final_tool_calls.is_none() && accumulated_content.contains("<tool_call>") {
+                let (clean, text_calls) = OpenAIClient::extract_tool_calls(&accumulated_content);
+                if text_calls.is_some() {
+                    accumulated_content = clean;
+                    final_tool_calls = text_calls;
+                    info!("[STREAM] Extracted text-based tool calls: {:?}", final_tool_calls);
+                }
+            }
 
             if !accumulated_content.is_empty() {
                 println!(

@@ -238,6 +238,9 @@ impl LLMClient for BedrockMantleClient {
                             tool_calls: None,
                             done: true,
                             done_reason: Some("stop".to_string()),
+                            thinking: None,
+                            tool_use: None,
+                            tool_result: None,
                         };
                         return;
                     }
@@ -303,6 +306,9 @@ impl LLMClient for BedrockMantleClient {
                                 tool_calls,
                                 done,
                                 done_reason,
+                                thinking: None,
+                                tool_use: None,
+                                tool_result: None,
                             };
                         }
                         Err(_) => continue,
@@ -394,5 +400,6 @@ fn parse_openai_response(chat_resp: serde_json::Value) -> Result<ChatResponse> {
         },
         tool_calls,
         done: true,
+        thinking: None,
     })
 }

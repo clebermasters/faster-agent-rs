@@ -172,6 +172,9 @@ impl LLMClient for BedrockBearerClient {
                     tool_calls: None,
                     done: false,
                     done_reason: None,
+                    thinking: None,
+                    tool_use: None,
+                    tool_result: None,
                 };
             }
 
@@ -182,6 +185,9 @@ impl LLMClient for BedrockBearerClient {
                     tool_calls: Some(tool_calls),
                     done: false,
                     done_reason: None,
+                    thinking: None,
+                    tool_use: None,
+                    tool_result: None,
                 };
             }
 
@@ -191,6 +197,9 @@ impl LLMClient for BedrockBearerClient {
                 tool_calls: None,
                 done: true,
                 done_reason: Some("end_turn".to_string()),
+                thinking: None,
+                tool_use: None,
+                tool_result: None,
             };
         })
     }
@@ -381,5 +390,6 @@ fn parse_converse_json(resp: &Value) -> Result<ChatResponse> {
             Some(tool_calls)
         },
         done: true,
+        thinking: None,
     })
 }
