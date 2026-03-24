@@ -535,7 +535,7 @@ impl LLMClient for OpenAIClient {
         Box::pin(async move {
             let has_tools = tools.as_ref().map_or(false, |t| !t.is_empty());
 
-            let messages: Vec<serde_json::Value> = messages
+            let mut messages: Vec<serde_json::Value> = messages
                 .into_iter()
                 .map(|m| {
                     json!({
@@ -544,6 +544,15 @@ impl LLMClient for OpenAIClient {
                     })
                 })
                 .collect();
+
+            // Inject CWD hint so the CLI model uses absolute paths from the project dir
+            if has_tools {
+                let cwd_hint = Self::tool_instruction(&[]);
+                if let Some(sys) = messages.iter_mut().find(|m| m["role"] == "system") {
+                    let existing = sys["content"].as_str().unwrap_or("").to_string();
+                    sys["content"] = json!(format!("{}{}", cwd_hint, existing));
+                }
+            }
 
             let body = Self::build_request_body(&model, &messages, false, has_tools);
             let cwd = std::env::current_dir()
@@ -623,7 +632,7 @@ impl LLMClient for OpenAIClient {
         Box::pin(async_stream::try_stream! {
             let has_tools = tools.as_ref().map_or(false, |t| !t.is_empty());
 
-            let messages: Vec<serde_json::Value> = messages
+            let mut messages: Vec<serde_json::Value> = messages
                 .into_iter()
                 .map(|m| {
                     json!({
@@ -632,6 +641,15 @@ impl LLMClient for OpenAIClient {
                     })
                 })
                 .collect();
+
+            // Inject CWD hint so the CLI model uses absolute paths from the project dir
+            if has_tools {
+                let cwd_hint = OpenAIClient::tool_instruction(&[]);
+                if let Some(sys) = messages.iter_mut().find(|m| m["role"] == "system") {
+                    let existing = sys["content"].as_str().unwrap_or("").to_string();
+                    sys["content"] = json!(format!("{}{}", cwd_hint, existing));
+                }
+            }
 
             let body = OpenAIClient::build_request_body(&model, &messages, true, has_tools);
             let cwd = std::env::current_dir()
