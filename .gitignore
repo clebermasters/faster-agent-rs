@@ -14,3 +14,10 @@ target/
 *.log
 coverage/
 skills/bedrock-models/data
+.omc
+scripts/cron
+.codex
+claude-zai.sh
+skills/bedrock-models/scripts/track_models.py
+docs/providers/openai-codex.md
+docs/cron-usage.md

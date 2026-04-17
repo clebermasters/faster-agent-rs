@@ -8,8 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use skill_tools::{ToolDefinition, ToolRegistry};
 use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::pin::Pin;
+use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "bedrock")]
@@ -581,7 +584,10 @@ impl LLMClient for OpenAIClient {
             let message = chat_resp["choices"][0]["message"].clone();
             let role = message["role"].as_str().unwrap_or("assistant").to_string();
             let raw_content = message["content"].as_str().unwrap_or("").to_string();
-            let thinking = message.get("thinking").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let thinking = message
+                .get("thinking")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             // Extract tool calls from text content
             let (content, text_tool_calls) = Self::extract_tool_calls(&raw_content);
@@ -601,7 +607,11 @@ impl LLMClient for OpenAIClient {
                         })
                     })
                     .collect();
-                if calls.is_empty() { text_tool_calls } else { Some(calls) }
+                if calls.is_empty() {
+                    text_tool_calls
+                } else {
+                    Some(calls)
+                }
             } else {
                 text_tool_calls
             };
@@ -816,6 +826,1246 @@ impl LLMClient for OpenAIClient {
             }
 
             info!("[OPENAI] Stream ended normally, total bytes: {}", bytes_received);
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI Codex subscription-backed client (ChatGPT-authenticated Responses API)
+// ---------------------------------------------------------------------------
+
+pub struct OpenAICodexClient {
+    client: Client,
+    base_url: String,
+    auth_path: PathBuf,
+    model: String,
+    client_version: String,
+    max_retries: usize,
+    retry_delay: Duration,
+}
+
+impl OpenAICodexClient {
+    const DEFAULT_BASE_URL: &'static str = "https://chatgpt.com/backend-api/codex";
+    const REFRESH_URL: &'static str = "https://auth.openai.com/oauth/token";
+    const CLIENT_ID: &'static str = "app_EMoamEEZ73f0CkXaXp7hrann";
+
+    pub fn new(
+        base_url: Option<String>,
+        auth_path: Option<String>,
+        client_version: Option<String>,
+        model: String,
+    ) -> Self {
+        Self {
+            client: Client::new(),
+            base_url: base_url
+                .unwrap_or_else(|| Self::DEFAULT_BASE_URL.to_string())
+                .trim_end_matches('/')
+                .to_string(),
+            auth_path: Self::expand_tilde(
+                &auth_path.unwrap_or_else(|| "~/.codex/auth.json".to_string()),
+            ),
+            model,
+            client_version: client_version.unwrap_or_else(Self::detect_client_version),
+            max_retries: 2,
+            retry_delay: Duration::from_secs(1),
+        }
+    }
+
+    fn expand_tilde(path: &str) -> PathBuf {
+        if let Some(stripped) = path.strip_prefix("~/") {
+            if let Ok(home) = std::env::var("HOME") {
+                return PathBuf::from(home).join(stripped);
+            }
+        }
+        PathBuf::from(path)
+    }
+
+    fn detect_client_version() -> String {
+        std::process::Command::new("codex")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .and_then(|stdout| stdout.split_whitespace().nth(1).map(str::to_string))
+            .unwrap_or_else(|| "0.120.0".to_string())
+    }
+
+    fn load_auth_payload(&self) -> Result<serde_json::Value> {
+        if !self.auth_path.exists() {
+            anyhow::bail!(
+                "Codex auth file not found at {}. Run `codex login` first.",
+                self.auth_path.display()
+            );
+        }
+
+        let raw = fs::read_to_string(&self.auth_path)?;
+        let payload: serde_json::Value = serde_json::from_str(&raw)?;
+
+        let access_token = payload
+            .get("tokens")
+            .and_then(|tokens| tokens.get("access_token"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if access_token.is_empty() {
+            anyhow::bail!(
+                "Codex auth file at {} does not contain an access token.",
+                self.auth_path.display()
+            );
+        }
+
+        Ok(payload)
+    }
+
+    fn access_token(auth_payload: &serde_json::Value) -> Result<String> {
+        auth_payload
+            .get("tokens")
+            .and_then(|tokens| tokens.get("access_token"))
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("Codex auth payload is missing an access token"))
+    }
+
+    fn refresh_token(auth_payload: &serde_json::Value) -> Result<String> {
+        auth_payload
+            .get("tokens")
+            .and_then(|tokens| tokens.get("refresh_token"))
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("Codex auth payload is missing a refresh token"))
+    }
+
+    fn persist_auth_tokens(
+        &self,
+        auth_payload: &mut serde_json::Value,
+        refreshed_tokens: &serde_json::Value,
+    ) -> Result<()> {
+        let token_map = auth_payload
+            .get_mut("tokens")
+            .and_then(|tokens| tokens.as_object_mut())
+            .ok_or_else(|| anyhow::anyhow!("Codex auth payload is missing the token object"))?;
+
+        for key in ["id_token", "access_token", "refresh_token"] {
+            if let Some(value) = refreshed_tokens.get(key).cloned() {
+                token_map.insert(key.to_string(), value);
+            }
+        }
+
+        let serialized = serde_json::to_string_pretty(auth_payload)?;
+        fs::write(&self.auth_path, serialized)?;
+        Ok(())
+    }
+
+    async fn refresh_access_token(&self, auth_payload: &mut serde_json::Value) -> Result<()> {
+        let refresh_token = Self::refresh_token(auth_payload)?;
+
+        let response = self
+            .client
+            .post(Self::REFRESH_URL)
+            .header("Content-Type", "application/json")
+            .json(&json!({
+                "client_id": Self::CLIENT_ID,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            }))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Failed to refresh Codex OAuth token: {} - {}",
+                status,
+                Self::extract_error_message(&error_text)
+            );
+        }
+
+        let refreshed: serde_json::Value = response.json().await?;
+        self.persist_auth_tokens(auth_payload, &refreshed)?;
+        Ok(())
+    }
+
+    fn extract_error_message(body: &str) -> String {
+        serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|payload| {
+                payload
+                    .get("detail")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        payload
+                            .get("error")
+                            .and_then(|value| value.get("message"))
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string)
+                    })
+                    .or_else(|| {
+                        payload
+                            .get("error")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string)
+                    })
+            })
+            .filter(|message| !message.is_empty())
+            .unwrap_or_else(|| body.to_string())
+    }
+
+    fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<serde_json::Value> {
+        tools
+            .into_iter()
+            .map(|tool| {
+                json!({
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                })
+            })
+            .collect()
+    }
+
+    fn convert_messages(messages: Vec<Message>) -> Result<(String, Vec<serde_json::Value>)> {
+        let mut instructions = Vec::new();
+        let mut input = Vec::new();
+
+        for message in messages {
+            match message.role.as_str() {
+                "system" => {
+                    if !message.content.trim().is_empty() {
+                        instructions.push(message.content);
+                    }
+                }
+                "user" => input.push(json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": message.content,
+                    }]
+                })),
+                "assistant" => {
+                    if message.content.starts_with("__tool_use__:") {
+                        let value: serde_json::Value =
+                            serde_json::from_str(&message.content["__tool_use__:".len()..])?;
+                        let arguments_value =
+                            value.get("input").cloned().unwrap_or_else(|| json!({}));
+                        let arguments = serde_json::to_string(&arguments_value)
+                            .unwrap_or_else(|_| "{}".to_string());
+                        let call_id = value
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .filter(|v| !v.is_empty())
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Tool use marker is missing a call id")
+                            })?;
+                        let name = value
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .filter(|v| !v.is_empty())
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Tool use marker is missing a tool name")
+                            })?;
+
+                        input.push(json!({
+                            "type": "function_call",
+                            "call_id": call_id,
+                            "name": name,
+                            "arguments": arguments,
+                        }));
+                    } else if !message.content.trim().is_empty() {
+                        input.push(json!({
+                            "role": "assistant",
+                            "content": [{
+                                "type": "output_text",
+                                "text": message.content,
+                            }]
+                        }));
+                    }
+                }
+                "tool" => {
+                    let call_id = message
+                        .tool_call_id
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| anyhow::anyhow!("Tool result is missing a tool_call_id"))?;
+                    input.push(json!({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": message.content,
+                    }));
+                }
+                other => input.push(json!({
+                    "role": other,
+                    "content": [{
+                        "type": "input_text",
+                        "text": message.content,
+                    }]
+                })),
+            }
+        }
+
+        if input.is_empty() {
+            input.push(json!({
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "",
+                }]
+            }));
+        }
+
+        let instructions = if instructions.is_empty() {
+            "You are a helpful assistant.".to_string()
+        } else {
+            instructions.join("\n\n")
+        };
+
+        Ok((instructions, input))
+    }
+
+    fn build_request_body(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Result<serde_json::Value> {
+        let (mut instructions, input) = Self::convert_messages(messages)?;
+        let has_tools = tools
+            .as_ref()
+            .map(|tools| !tools.is_empty())
+            .unwrap_or(false);
+        if has_tools {
+            instructions = format!("{}{}", OpenAIClient::tool_instruction(&[]), instructions);
+        }
+        let mut body = json!({
+            "model": self.model,
+            "instructions": instructions,
+            "input": input,
+            "parallel_tool_calls": false,
+            "store": false,
+            "stream": true,
+            "text": {
+                "format": {
+                    "type": "text"
+                }
+            }
+        });
+
+        if let Some(tools) = tools {
+            if !tools.is_empty() {
+                body["tools"] = serde_json::Value::Array(Self::convert_tools(tools));
+            }
+        }
+
+        Ok(body)
+    }
+
+    async fn send_responses_request(&self, body: &serde_json::Value) -> Result<reqwest::Response> {
+        let mut auth_payload = self.load_auth_payload()?;
+        let url = format!("{}/responses", self.base_url);
+
+        for attempt in 0..=self.max_retries {
+            let access_token = Self::access_token(&auth_payload)?;
+            let response = self
+                .client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .query(&[("client_version", self.client_version.as_str())])
+                .json(body)
+                .send()
+                .await;
+
+            let response = match response {
+                Ok(response) => response,
+                Err(err) => {
+                    if attempt < self.max_retries {
+                        tokio::time::sleep(self.retry_delay * (attempt as u32 + 1)).await;
+                        continue;
+                    }
+                    return Err(err.into());
+                }
+            };
+
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                self.refresh_access_token(&mut auth_payload).await?;
+                if attempt < self.max_retries {
+                    continue;
+                }
+            }
+
+            if response.status().is_success() {
+                return Ok(response);
+            }
+
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            let retryable = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504);
+            if retryable && attempt < self.max_retries {
+                tokio::time::sleep(self.retry_delay * (attempt as u32 + 1)).await;
+                continue;
+            }
+
+            anyhow::bail!(
+                "OpenAI Codex API error: {} - {}",
+                status,
+                Self::extract_error_message(&error_text)
+            );
+        }
+
+        anyhow::bail!("OpenAI Codex request failed without a response")
+    }
+
+    fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
+        serde_json::from_str(arguments)
+            .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string()))
+    }
+
+    fn parse_sse_response(body: &str) -> Result<ChatResponse> {
+        let mut content = String::new();
+        let mut saw_text_delta = false;
+        let mut pending_calls: HashMap<String, (String, String, String)> = HashMap::new();
+        let mut tool_calls = Vec::new();
+
+        for raw_line in body.lines() {
+            let line = raw_line.trim();
+            if !line.starts_with("data:") {
+                continue;
+            }
+
+            let data = line[5..].trim();
+            if data.is_empty() {
+                continue;
+            }
+
+            let event: serde_json::Value = match serde_json::from_str(data) {
+                Ok(event) => event,
+                Err(_) => continue,
+            };
+
+            match event
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+            {
+                "response.output_text.delta" => {
+                    if let Some(delta) = event.get("delta").and_then(|value| value.as_str()) {
+                        content.push_str(delta);
+                        saw_text_delta = true;
+                    }
+                }
+                "response.output_text.done" => {
+                    if !saw_text_delta {
+                        if let Some(text) = event.get("text").and_then(|value| value.as_str()) {
+                            content.push_str(text);
+                        }
+                    }
+                }
+                "response.output_item.added" => {
+                    if event
+                        .get("item")
+                        .and_then(|item| item.get("type"))
+                        .and_then(|value| value.as_str())
+                        == Some("function_call")
+                    {
+                        let item = &event["item"];
+                        let item_id = item["id"].as_str().unwrap_or_default().to_string();
+                        if !item_id.is_empty() {
+                            pending_calls.insert(
+                                item_id,
+                                (
+                                    item["call_id"].as_str().unwrap_or_default().to_string(),
+                                    item["name"].as_str().unwrap_or_default().to_string(),
+                                    String::new(),
+                                ),
+                            );
+                        }
+                    }
+                }
+                "response.function_call_arguments.delta" => {
+                    let item_id = event["item_id"].as_str().unwrap_or_default();
+                    let delta = event["delta"].as_str().unwrap_or_default();
+                    if let Some((_, _, arguments)) = pending_calls.get_mut(item_id) {
+                        arguments.push_str(delta);
+                    }
+                }
+                "response.function_call_arguments.done" => {
+                    let item_id = event["item_id"].as_str().unwrap_or_default();
+                    if let Some((_, _, arguments)) = pending_calls.get_mut(item_id) {
+                        *arguments = event["arguments"].as_str().unwrap_or_default().to_string();
+                    }
+                }
+                "response.output_item.done" => {
+                    if event
+                        .get("item")
+                        .and_then(|item| item.get("type"))
+                        .and_then(|value| value.as_str())
+                        == Some("function_call")
+                    {
+                        let item = &event["item"];
+                        let item_id = item["id"].as_str().unwrap_or_default();
+                        let (call_id, name, stored_arguments) =
+                            pending_calls.remove(item_id).unwrap_or_else(|| {
+                                (
+                                    item["call_id"].as_str().unwrap_or_default().to_string(),
+                                    item["name"].as_str().unwrap_or_default().to_string(),
+                                    String::new(),
+                                )
+                            });
+                        let arguments = item["arguments"]
+                            .as_str()
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or(&stored_arguments);
+                        tool_calls.push(ToolCall {
+                            id: Some(call_id),
+                            name,
+                            arguments: Self::parse_tool_arguments(arguments),
+                        });
+                    }
+                }
+                "response.failed" => {
+                    let message = event
+                        .get("response")
+                        .and_then(|response| response.get("error"))
+                        .and_then(|error| error.get("message"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("OpenAI Codex response failed");
+                    anyhow::bail!(message.to_string());
+                }
+                _ => {}
+            }
+        }
+
+        if content.trim().is_empty() && tool_calls.is_empty() {
+            anyhow::bail!("OpenAI Codex returned an empty response")
+        }
+
+        Ok(ChatResponse {
+            message: Message {
+                role: "assistant".to_string(),
+                content: content.trim().to_string(),
+                tool_call_id: None,
+            },
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
+            done: true,
+            thinking: None,
+        })
+    }
+}
+
+impl LLMClient for OpenAICodexClient {
+    fn chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<ChatResponse>> + Send + '_>> {
+        Box::pin(async move {
+            let body = self.build_request_body(messages, tools)?;
+            debug!("[OPENAI-CODEX] Sending chat request to: {}", self.base_url);
+            let response = self.send_responses_request(&body).await?;
+            let sse_body = response.text().await?;
+            Self::parse_sse_response(&sse_body)
+        })
+    }
+
+    fn chat_streaming(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Pin<Box<dyn Stream<Item = Result<ChatChunk>> + Send + '_>> {
+        Box::pin(async_stream::try_stream! {
+            let body = self.build_request_body(messages, tools)?;
+            debug!("[OPENAI-CODEX] Sending streaming chat request to: {}", self.base_url);
+            let response = self.send_responses_request(&body).await?;
+            let mut stream = response.bytes_stream();
+            let mut buffer = String::new();
+            let mut saw_text_delta = false;
+            let mut pending_calls: HashMap<String, (String, String, String)> = HashMap::new();
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk_bytes = chunk_result?;
+                if chunk_bytes.is_empty() {
+                    continue;
+                }
+
+                buffer.push_str(&String::from_utf8_lossy(&chunk_bytes));
+
+                while let Some(newline_idx) = buffer.find('\n') {
+                    let line: String = buffer.drain(..=newline_idx).collect();
+                    let line = line.trim();
+                    if !line.starts_with("data:") {
+                        continue;
+                    }
+
+                    let data = line[5..].trim();
+                    if data.is_empty() {
+                        continue;
+                    }
+
+                    let event: serde_json::Value = match serde_json::from_str(data) {
+                        Ok(event) => event,
+                        Err(_) => continue,
+                    };
+
+                    match event.get("type").and_then(|value| value.as_str()).unwrap_or_default() {
+                        "response.output_text.delta" => {
+                            if let Some(delta) = event.get("delta").and_then(|value| value.as_str()) {
+                                saw_text_delta = true;
+                                yield ChatChunk {
+                                    content: delta.to_string(),
+                                    tool_calls: None,
+                                    done: false,
+                                    done_reason: None,
+                                    thinking: None,
+                                    tool_use: None,
+                                    tool_result: None,
+                                };
+                            }
+                        }
+                        "response.output_text.done" => {
+                            if !saw_text_delta {
+                                if let Some(text) = event.get("text").and_then(|value| value.as_str()) {
+                                    yield ChatChunk {
+                                        content: text.to_string(),
+                                        tool_calls: None,
+                                        done: false,
+                                        done_reason: None,
+                                        thinking: None,
+                                        tool_use: None,
+                                        tool_result: None,
+                                    };
+                                }
+                            }
+                        }
+                        "response.output_item.added" => {
+                            if event
+                                .get("item")
+                                .and_then(|item| item.get("type"))
+                                .and_then(|value| value.as_str())
+                                == Some("function_call")
+                            {
+                                let item = &event["item"];
+                                let item_id = item["id"].as_str().unwrap_or_default().to_string();
+                                if !item_id.is_empty() {
+                                    pending_calls.insert(
+                                        item_id,
+                                        (
+                                            item["call_id"].as_str().unwrap_or_default().to_string(),
+                                            item["name"].as_str().unwrap_or_default().to_string(),
+                                            String::new(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        "response.function_call_arguments.delta" => {
+                            let item_id = event["item_id"].as_str().unwrap_or_default();
+                            let delta = event["delta"].as_str().unwrap_or_default();
+                            if let Some((_, _, arguments)) = pending_calls.get_mut(item_id) {
+                                arguments.push_str(delta);
+                            }
+                        }
+                        "response.function_call_arguments.done" => {
+                            let item_id = event["item_id"].as_str().unwrap_or_default();
+                            if let Some((_, _, arguments)) = pending_calls.get_mut(item_id) {
+                                *arguments = event["arguments"].as_str().unwrap_or_default().to_string();
+                            }
+                        }
+                        "response.output_item.done" => {
+                            if event
+                                .get("item")
+                                .and_then(|item| item.get("type"))
+                                .and_then(|value| value.as_str())
+                                == Some("function_call")
+                            {
+                                let item = &event["item"];
+                                let item_id = item["id"].as_str().unwrap_or_default();
+                                let (call_id, name, stored_arguments) = pending_calls
+                                    .remove(item_id)
+                                    .unwrap_or_else(|| {
+                                        (
+                                            item["call_id"].as_str().unwrap_or_default().to_string(),
+                                            item["name"].as_str().unwrap_or_default().to_string(),
+                                            String::new(),
+                                        )
+                                    });
+                                let arguments = item["arguments"]
+                                    .as_str()
+                                    .filter(|value| !value.is_empty())
+                                    .unwrap_or(&stored_arguments);
+
+                                yield ChatChunk {
+                                    content: String::new(),
+                                    tool_calls: Some(vec![ToolCall {
+                                        id: Some(call_id),
+                                        name,
+                                        arguments: Self::parse_tool_arguments(arguments),
+                                    }]),
+                                    done: false,
+                                    done_reason: None,
+                                    thinking: None,
+                                    tool_use: None,
+                                    tool_result: None,
+                                };
+                            }
+                        }
+                        "response.completed" => {
+                            yield ChatChunk {
+                                content: String::new(),
+                                tool_calls: None,
+                                done: true,
+                                done_reason: Some("stop".to_string()),
+                                thinking: None,
+                                tool_use: None,
+                                tool_result: None,
+                            };
+                            return;
+                        }
+                        "response.failed" => {
+                            let message = event
+                                .get("response")
+                                .and_then(|response| response.get("error"))
+                                .and_then(|error| error.get("message"))
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("OpenAI Codex response failed");
+                            Err(anyhow::anyhow!(message.to_string()))?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            Err(anyhow::anyhow!("OpenAI Codex stream ended before response.completed"))?;
+        })
+    }
+}
+
+#[cfg(test)]
+mod openai_codex_tests {
+    use super::*;
+
+    fn sample_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" }
+                },
+                "required": ["path"]
+            }),
+        }
+    }
+
+    #[test]
+    fn convert_messages_preserves_function_call_history() {
+        let messages = vec![
+            Message {
+                role: "system".to_string(),
+                content: "System prompt".to_string(),
+                tool_call_id: None,
+            },
+            Message {
+                role: "user".to_string(),
+                content: "Open README".to_string(),
+                tool_call_id: None,
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: "__tool_use__:{\"id\":\"call_123\",\"name\":\"read_file\",\"input\":{\"path\":\"/tmp/README.md\"}}".to_string(),
+                tool_call_id: None,
+            },
+            Message {
+                role: "tool".to_string(),
+                content: "# Heading".to_string(),
+                tool_call_id: Some("call_123".to_string()),
+            },
+        ];
+
+        let (instructions, input) = OpenAICodexClient::convert_messages(messages).unwrap();
+
+        assert_eq!(instructions, "System prompt");
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[1]["type"], "function_call");
+        assert_eq!(input[1]["call_id"], "call_123");
+        assert_eq!(input[1]["name"], "read_file");
+        assert_eq!(input[1]["arguments"], "{\"path\":\"/tmp/README.md\"}");
+        assert_eq!(input[2]["type"], "function_call_output");
+        assert_eq!(input[2]["call_id"], "call_123");
+        assert_eq!(input[2]["output"], "# Heading");
+    }
+
+    #[test]
+    fn build_request_body_adds_tool_instruction_when_tools_are_present() {
+        let client = OpenAICodexClient::new(
+            Some("https://chatgpt.com/backend-api/codex".to_string()),
+            Some("~/.codex/auth.json".to_string()),
+            Some("0.120.0".to_string()),
+            "gpt-5.4".to_string(),
+        );
+
+        let body = client
+            .build_request_body(
+                vec![Message {
+                    role: "user".to_string(),
+                    content: "Read the file".to_string(),
+                    tool_call_id: None,
+                }],
+                Some(vec![sample_tool()]),
+            )
+            .unwrap();
+
+        let instructions = body["instructions"].as_str().unwrap_or_default();
+        assert!(instructions.contains("IMPORTANT: The user's project directory is:"));
+        assert_eq!(body["tools"].as_array().map(|v| v.len()), Some(1));
+    }
+
+    #[test]
+    fn parse_sse_response_reads_text_output() {
+        let body = r#"
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","status":"in_progress","content":[],"role":"assistant"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"hello"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":" world"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"}}
+"#;
+
+        let response = OpenAICodexClient::parse_sse_response(body).unwrap();
+        assert_eq!(response.message.content, "hello world");
+        assert!(response.tool_calls.is_none());
+    }
+
+    #[test]
+    fn parse_sse_response_reads_function_calls() {
+        let body = r#"
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","status":"in_progress","arguments":"","call_id":"call_abc","name":"read_file"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{\"path\":\"/tmp/README.md\"}","item_id":"fc_1"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","arguments":"{\"path\":\"/tmp/README.md\"}","item_id":"fc_1"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"path\":\"/tmp/README.md\"}","call_id":"call_abc","name":"read_file"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"}}
+"#;
+
+        let response = OpenAICodexClient::parse_sse_response(body).unwrap();
+        let tool_calls = response.tool_calls.unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id.as_deref(), Some("call_abc"));
+        assert_eq!(tool_calls[0].name, "read_file");
+        assert_eq!(tool_calls[0].arguments["path"], "/tmp/README.md");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic-compatible client (works with z.ai and any Anthropic-format API)
+// ---------------------------------------------------------------------------
+
+pub struct AnthropicClient {
+    client: Client,
+    base_url: String,
+    api_key: String,
+    model: String,
+}
+
+impl AnthropicClient {
+    pub fn new(base_url: String, api_key: String, model: String) -> Self {
+        Self {
+            client: Client::new(),
+            base_url,
+            api_key,
+            model,
+        }
+    }
+
+    /// Convert internal messages to Anthropic format.
+    /// Anthropic uses a separate `system` top-level field instead of a system message.
+    fn convert_messages(messages: Vec<Message>) -> (Option<String>, Vec<serde_json::Value>) {
+        let mut system_prompt = None;
+        let mut converted = Vec::new();
+
+        for m in messages {
+            if m.role == "system" {
+                system_prompt = Some(m.content);
+            } else if m.role == "tool" {
+                // Tool result → Anthropic tool_result content block
+                converted.push(json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": m.tool_call_id.unwrap_or_default(),
+                        "content": m.content
+                    }]
+                }));
+            } else if m.role == "assistant" {
+                // If this is a __tool_use__ marker, extract and convert
+                if m.content.starts_with("__tool_use__:") {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(
+                        &m.content["__tool_use__:".len()..],
+                    ) {
+                        converted.push(json!({
+                            "role": "assistant",
+                            "content": [{
+                                "type": "tool_use",
+                                "id": val["id"],
+                                "name": val["name"],
+                                "input": val["input"]
+                            }]
+                        }));
+                    }
+                } else {
+                    converted.push(json!({
+                        "role": "assistant",
+                        "content": m.content
+                    }));
+                }
+            } else {
+                converted.push(json!({
+                    "role": m.role,
+                    "content": m.content
+                }));
+            }
+        }
+
+        (system_prompt, converted)
+    }
+
+    /// Convert internal tool definitions to Anthropic format.
+    fn convert_tools(tools: &[ToolDefinition]) -> Vec<serde_json::Value> {
+        tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.parameters
+                })
+            })
+            .collect()
+    }
+}
+
+impl LLMClient for AnthropicClient {
+    fn chat(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<ChatResponse>> + Send + '_>> {
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+
+        Box::pin(async move {
+            let (system_prompt, anthropic_messages) = Self::convert_messages(messages);
+
+            let mut body = json!({
+                "model": model,
+                "max_tokens": 4096,
+                "messages": anthropic_messages,
+            });
+
+            if let Some(sys) = system_prompt {
+                body["system"] = json!(sys);
+            }
+
+            if let Some(ref tools) = tools {
+                if !tools.is_empty() {
+                    body["tools"] = serde_json::Value::Array(Self::convert_tools(tools));
+                }
+            }
+
+            debug!("[ANTHROPIC] Sending chat request to: {}", base_url);
+
+            let response = client
+                .post(format!("{}/v1/messages", base_url))
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                anyhow::bail!("Anthropic API error: {} - {}", status, error_text);
+            }
+
+            let resp: serde_json::Value = response.json().await?;
+
+            // Parse content blocks
+            let empty_blocks = vec![];
+            let content_blocks = resp["content"].as_array().unwrap_or(&empty_blocks);
+            let mut text_content = String::new();
+            let mut tool_calls = Vec::new();
+
+            for block in content_blocks {
+                match block["type"].as_str() {
+                    Some("text") => {
+                        text_content.push_str(block["text"].as_str().unwrap_or(""));
+                    }
+                    Some("tool_use") => {
+                        tool_calls.push(ToolCall {
+                            id: block["id"].as_str().map(|s| s.to_string()),
+                            name: block["name"].as_str().unwrap_or_default().to_string(),
+                            arguments: block["input"].clone(),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+
+            let thinking = resp
+                .get("thinking")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            Ok(ChatResponse {
+                message: Message {
+                    role: "assistant".to_string(),
+                    content: text_content,
+                    tool_call_id: None,
+                },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
+                done: true,
+                thinking,
+            })
+        })
+    }
+
+    fn chat_streaming(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Pin<Box<dyn Stream<Item = Result<ChatChunk>> + Send + '_>> {
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+
+        Box::pin(async_stream::try_stream! {
+            let (system_prompt, anthropic_messages) = Self::convert_messages(messages);
+
+            let mut body = json!({
+                "model": model,
+                "max_tokens": 4096,
+                "messages": anthropic_messages,
+                "stream": true,
+            });
+
+            if let Some(sys) = system_prompt {
+                body["system"] = json!(sys);
+            }
+
+            if let Some(ref tools) = tools {
+                if !tools.is_empty() {
+                    body["tools"] = serde_json::Value::Array(Self::convert_tools(tools));
+                }
+            }
+
+            debug!("[ANTHROPIC] Sending streaming chat request");
+
+            let response = client
+                .post(format!("{}/v1/messages", base_url))
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| {
+                    error!("[ANTHROPIC] Request error: {}", e);
+                    anyhow::anyhow!("Request error: {}", e)
+                })?;
+
+            let status = response.status();
+            if !status.is_success() {
+                error!("[ANTHROPIC] API error: {}", status);
+                Err(anyhow::anyhow!("Anthropic API error: {}", status))?;
+            }
+
+            info!("[ANTHROPIC] Streaming response started");
+            let mut stream = response.bytes_stream();
+            let mut bytes_received = 0;
+
+            // Track tool_use blocks: (id, name) from content_block_start, accumulated JSON input
+            let mut tool_blocks: HashMap<usize, (String, String, String)> = HashMap::new();
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk_bytes = match chunk_result {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        error!("[ANTHROPIC] Stream read error: {}", e);
+                        Err(anyhow::anyhow!("Stream error: {}", e))?;
+                        unreachable!()
+                    }
+                };
+
+                bytes_received += chunk_bytes.len();
+                debug!("[ANTHROPIC] Received {} bytes (total: {})", chunk_bytes.len(), bytes_received);
+
+                if chunk_bytes.is_empty() {
+                    continue;
+                }
+
+                let chunk_str = String::from_utf8_lossy(&chunk_bytes);
+
+                for line in chunk_str.lines() {
+                    let line = line.trim();
+                    if !line.starts_with("data:") {
+                        continue;
+                    }
+                    let data = line[5..].trim();
+                    if data.is_empty() {
+                        continue;
+                    }
+
+                    match serde_json::from_str::<serde_json::Value>(data) {
+                        Ok(event) => {
+                            let event_type = event["type"].as_str().unwrap_or("");
+
+                            match event_type {
+                                "content_block_delta" => {
+                                    let delta = &event["delta"];
+                                    let delta_type = delta["type"].as_str().unwrap_or("");
+
+                                    match delta_type {
+                                        "text_delta" => {
+                                            let text = delta["text"].as_str().unwrap_or("");
+                                            if !text.is_empty() {
+                                                yield ChatChunk {
+                                                    content: text.to_string(),
+                                                    tool_calls: None,
+                                                    done: false,
+                                                    done_reason: None,
+                                                    thinking: None,
+                                                    tool_use: None,
+                                                    tool_result: None,
+                                                };
+                                            }
+                                        }
+                                        "input_json_delta" => {
+                                            let index = event["index"].as_u64().unwrap_or(0) as usize;
+                                            let partial = delta["partial_json"].as_str().unwrap_or("");
+                                            tool_blocks.entry(index)
+                                                .and_modify(|(_, _, buf)| buf.push_str(partial));
+                                        }
+                                        "thinking_delta" => {
+                                            let thinking = delta["thinking"].as_str().unwrap_or("");
+                                            if !thinking.is_empty() {
+                                                yield ChatChunk {
+                                                    content: String::new(),
+                                                    tool_calls: None,
+                                                    done: false,
+                                                    done_reason: None,
+                                                    thinking: Some(thinking.to_string()),
+                                                    tool_use: None,
+                                                    tool_result: None,
+                                                };
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                "content_block_start" => {
+                                    let content_block = &event["content_block"];
+                                    if content_block["type"].as_str() == Some("tool_use") {
+                                        let index = event["index"].as_u64().unwrap_or(0) as usize;
+                                        let id = content_block["id"].as_str().unwrap_or_default().to_string();
+                                        let name = content_block["name"].as_str().unwrap_or_default().to_string();
+                                        tool_blocks.insert(index, (id, name, String::new()));
+                                    }
+                                }
+                                "message_delta" => {
+                                    let stop_reason = event["delta"]["stop_reason"].as_str();
+
+                                    // On tool_use stop, emit all accumulated tool calls
+                                    if stop_reason == Some("tool_use") && !tool_blocks.is_empty() {
+                                        let calls: Vec<ToolCall> = tool_blocks.iter()
+                                            .map(|(_, (id, name, buf))| {
+                                                let arguments = serde_json::from_str::<serde_json::Value>(buf)
+                                                    .unwrap_or(json!({}));
+                                                ToolCall {
+                                                    id: Some(id.clone()),
+                                                    name: name.clone(),
+                                                    arguments,
+                                                }
+                                            })
+                                            .collect();
+                                        yield ChatChunk {
+                                            content: String::new(),
+                                            tool_calls: Some(calls),
+                                            done: false,
+                                            done_reason: None,
+                                            thinking: None,
+                                            tool_use: None,
+                                            tool_result: None,
+                                        };
+                                    }
+
+                                    if stop_reason.is_some() {
+                                        info!("[ANTHROPIC] Received stop_reason: {:?}", stop_reason);
+                                        yield ChatChunk {
+                                            content: String::new(),
+                                            tool_calls: None,
+                                            done: true,
+                                            done_reason: stop_reason.map(|s| s.to_string()),
+                                            thinking: None,
+                                            tool_use: None,
+                                            tool_result: None,
+                                        };
+                                        return;
+                                    }
+                                }
+                                "message_stop" => {
+                                    info!("[ANTHROPIC] Received message_stop");
+                                    yield ChatChunk {
+                                        content: String::new(),
+                                        tool_calls: None,
+                                        done: true,
+                                        done_reason: Some("stop".to_string()),
+                                        thinking: None,
+                                        tool_use: None,
+                                        tool_result: None,
+                                    };
+                                    return;
+                                }
+                                "ping" | "message_start" | "content_block_stop" => {}
+                                _ => {
+                                    debug!("[ANTHROPIC] Unknown event type: {}", event_type);
+                                }
+                            }
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+
+            info!("[ANTHROPIC] Stream ended normally, total bytes: {}", bytes_received);
         })
     }
 }
@@ -1201,7 +2451,6 @@ pub struct Agent {
     tool_registry: ToolRegistry,
     mcp_registry: Option<std::sync::Arc<skill_mcp::McpRegistry>>,
     max_iterations: usize,
-    tool_call_history: HashMap<String, usize>,
     extra_system_prompt: Option<String>,
 }
 
@@ -1212,7 +2461,6 @@ impl Agent {
             tool_registry: ToolRegistry::new(),
             mcp_registry: None,
             max_iterations: 10,
-            tool_call_history: HashMap::new(),
             extra_system_prompt: None,
         }
     }
@@ -1382,7 +2630,7 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
             if let Some(tool_calls) = response.tool_calls {
                 // Execute tool calls ONE AT A TIME and ask LLM for next step after each
                 // This enables chaining - LLM sees result before deciding next action
-                for (i, call) in tool_calls.iter().enumerate() {
+                for call in &tool_calls {
                     let formatted_args = serde_json::to_string_pretty(&call.arguments)
                         .unwrap_or_else(|_| format!("{:?}", call.arguments));
                     println!(
@@ -1921,8 +3169,7 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
 
                 // Display tool execution events in real-time
                 if let Some(ref tu) = chunk.tool_use {
-                    let args_preview = serde_json::to_string(&tu.input)
-                        .unwrap_or_default();
+                    let args_preview = serde_json::to_string(&tu.input).unwrap_or_default();
                     let args_short = if args_preview.len() > 120 {
                         format!("{}...", &args_preview[..120])
                     } else {
@@ -2039,7 +3286,10 @@ When you finish a task, provide a clear, formatted summary of what was done."#,
                 if text_calls.is_some() {
                     accumulated_content = clean;
                     final_tool_calls = text_calls;
-                    info!("[STREAM] Extracted text-based tool calls: {:?}", final_tool_calls);
+                    info!(
+                        "[STREAM] Extracted text-based tool calls: {:?}",
+                        final_tool_calls
+                    );
                 }
             }
 

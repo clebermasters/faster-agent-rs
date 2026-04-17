@@ -4,7 +4,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tracing::{debug, info, warn};
 
@@ -33,10 +33,10 @@ struct JsonRpcRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 struct JsonRpcResponse {
-    #[serde(default)]
-    jsonrpc: String,
-    #[serde(default)]
-    id: u64,
+    #[serde(rename = "jsonrpc", default)]
+    _jsonrpc: String,
+    #[serde(rename = "id", default)]
+    _id: u64,
     #[serde(default)]
     result: Option<serde_json::Value>,
     #[serde(default)]
@@ -65,13 +65,14 @@ struct ListToolsResult {
 
 pub struct McpClient {
     name: String,
-    command: String,
-    args: Vec<String>,
-    env: HashMap<String, String>,
+    _command: String,
+    _args: Vec<String>,
+    _env: HashMap<String, String>,
     process: Option<Child>,
     stdin: Option<tokio::sync::mpsc::Sender<String>>,
     reader: tokio::sync::mpsc::Receiver<String>,
     request_id: u64,
+    response_timeout: Duration,
 }
 
 impl McpClient {
@@ -145,13 +146,14 @@ impl McpClient {
         // Send initialize request
         let mut client = Self {
             name: name.clone(),
-            command,
-            args,
-            env,
+            _command: command,
+            _args: args,
+            _env: env,
             process: Some(child),
             stdin: Some(request_tx),
             reader: response_rx,
             request_id: 0,
+            response_timeout: timeout,
         };
 
         // Initialize
@@ -262,7 +264,7 @@ impl McpClient {
 
         // Wait for response with timeout
         let response_str =
-            match tokio::time::timeout(Duration::from_secs(30), self.reader.recv()).await {
+            match tokio::time::timeout(self.response_timeout, self.reader.recv()).await {
                 Ok(Some(response)) => response,
                 Ok(None) => {
                     return Err(McpError::Connection(

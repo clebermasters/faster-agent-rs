@@ -5,17 +5,28 @@ use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum TimeoutParam {
+    String(String),
+    Number(u64),
+}
+
+#[derive(Debug, Deserialize)]
 pub struct BashParams {
     pub command: String,
     #[serde(default)]
-    pub timeout: Option<String>,
+    pub timeout: Option<TimeoutParam>,
     #[serde(default)]
     pub workdir: Option<String>,
 }
 
 impl BashParams {
     pub fn timeout_ms(&self) -> Option<u64> {
-        self.timeout.as_ref().and_then(|s| s.parse().ok())
+        match self.timeout.as_ref() {
+            Some(TimeoutParam::String(value)) => value.parse().ok(),
+            Some(TimeoutParam::Number(value)) => Some(*value),
+            None => None,
+        }
     }
 }
 
@@ -149,5 +160,32 @@ impl BashTool {
             result.output.len()
         );
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_numeric_timeout() {
+        let params: BashParams = serde_json::from_value(serde_json::json!({
+            "command": "pwd",
+            "timeout": 10000
+        }))
+        .unwrap();
+
+        assert_eq!(params.timeout_ms(), Some(10000));
+    }
+
+    #[test]
+    fn parses_string_timeout() {
+        let params: BashParams = serde_json::from_value(serde_json::json!({
+            "command": "pwd",
+            "timeout": "10000"
+        }))
+        .unwrap();
+
+        assert_eq!(params.timeout_ms(), Some(10000));
     }
 }

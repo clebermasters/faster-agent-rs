@@ -157,11 +157,16 @@ cargo run --release -- discover "summarize a PDF document"
 cargo run --release -- --help
 
 # Key flags:
-#   --llm-provider <PROVIDER>  'minimax', 'ollama', or 'bedrock' (default: minimax)
+#   --llm-provider <PROVIDER>  'minimax', 'openai', 'openai-codex', 'anthropic', 'ollama', or 'bedrock' (default: minimax)
 #   --llm-model <MODEL>        LLM model name
 #   --skills-dir <PATH>        Skills directory (default: ./skills)
 #   -v, --verbose              Debug-level logging
 #   --streaming                Streaming output
+#
+# OpenAI Codex-specific:
+#   --openai-codex-url <URL>                   Codex subscription backend
+#   --openai-codex-auth-path <PATH>            `codex login` auth file
+#   --openai-codex-client-version <VERSION>    Defaults to `codex --version`
 #
 # Bedrock-specific:
 #   --bedrock-auth <MODE>      default|static|sts-token|sts-role|api-key
@@ -234,10 +239,15 @@ The **frontmatter** (`name`, `description`, `trigger`) is what appears in the sk
 | Provider | `--llm-provider` | Description |
 |---|---|---|
 | **MiniMax** | `minimax` | Default. Cloud API, strong reasoning and coding. |
+| **OpenAI-compatible** | `openai` | Existing OpenAI-format wrapper endpoint, such as localhost or another compatible gateway. |
+| **OpenAI Codex Subscription** | `openai-codex` | Uses the authenticated Codex CLI subscription from `~/.codex/auth.json`. |
+| **Anthropic-compatible** | `anthropic` | Anthropic-format endpoints such as `z.ai`. |
 | **Ollama** | `ollama` | Local inference. Also used for vector embeddings (index/discover). |
 | **AWS Bedrock** | `bedrock` | Access Claude, Nova, MiniMax M2.1, ZAI GLM-4.7 and more. Supports IAM, STS, and Bedrock API Key auth. |
 
-For full AWS Bedrock setup instructions see:
+For full provider setup instructions see:
+
+**[docs/providers/openai-codex.md](docs/providers/openai-codex.md)**
 
 **[docs/providers/bedrock.md](docs/providers/bedrock.md)**
 

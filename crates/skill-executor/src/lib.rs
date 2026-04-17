@@ -12,14 +12,14 @@ pub mod error;
 pub use context::ExecutionContext;
 
 pub struct SkillExecutor {
-    skills_base_dir: PathBuf,
+    _skills_base_dir: PathBuf,
     default_timeout_secs: u64,
 }
 
 impl SkillExecutor {
     pub fn new(skills_base_dir: PathBuf) -> Self {
         Self {
-            skills_base_dir,
+            _skills_base_dir: skills_base_dir,
             default_timeout_secs: 300,
         }
     }

@@ -4,7 +4,10 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use skill_core::{Config, SkillQuery};
 use skill_executor::{ExecutionContext, SkillExecutor};
-use skill_llm::{Agent, BedrockAuth, MiniMaxClient, OllamaClient, OpenAIClient, StreamingAgent};
+use skill_llm::{
+    Agent, AnthropicClient, BedrockAuth, MiniMaxClient, OllamaClient, OpenAIClient,
+    OpenAICodexClient, StreamingAgent,
+};
 use skill_mcp::McpRegistry;
 use skill_registry::SkillRegistry;
 use skill_tools::{BashTool, ReadTool, SkillTool, ToolBox, ToolRegistry, WriteTool};
@@ -55,6 +58,32 @@ struct Cli {
     /// API key for the OpenAI-compatible endpoint
     #[arg(long, env = "OPENAI_API_KEY")]
     openai_api_key: Option<String>,
+
+    // ------------------------------------------------------------------
+    // OpenAI Codex subscription-backed provider (--llm-provider openai-codex)
+    // ------------------------------------------------------------------
+    /// Base URL for the authenticated Codex backend
+    #[arg(long, env = "OPENAI_CODEX_BASE_URL")]
+    openai_codex_url: Option<String>,
+
+    /// Path to the Codex auth file created by `codex login`
+    #[arg(long, env = "OPENAI_CODEX_AUTH_PATH")]
+    openai_codex_auth_path: Option<String>,
+
+    /// Codex client version sent to the backend (defaults to `codex --version`)
+    #[arg(long, env = "OPENAI_CODEX_CLIENT_VERSION")]
+    openai_codex_client_version: Option<String>,
+
+    // ------------------------------------------------------------------
+    // Anthropic-compatible provider (--llm-provider anthropic)
+    // ------------------------------------------------------------------
+    /// Base URL for any Anthropic-format API (e.g. https://api.z.ai/api/anthropic)
+    #[arg(long, env = "ANTHROPIC_BASE_URL")]
+    anthropic_url: Option<String>,
+
+    /// API key for the Anthropic-compatible endpoint
+    #[arg(long, env = "ANTHROPIC_API_KEY")]
+    anthropic_api_key: Option<String>,
 
     #[arg(long, default_value = "./mcp.json")]
     mcp_config: PathBuf,
@@ -413,11 +442,36 @@ async fn main() -> anyhow::Result<()> {
                     let url = cli
                         .openai_url
                         .unwrap_or_else(|| "http://localhost:8000".to_string());
-                    let api_key = cli
-                        .openai_api_key
-                        .unwrap_or_else(|| "no-key".to_string());
+                    let api_key = cli.openai_api_key.unwrap_or_else(|| "no-key".to_string());
                     info!("Using OpenAI-compatible provider: {}", url);
                     Box::new(OpenAIClient::new(url, api_key, cli.llm_model.clone()))
+                }
+                "openai-codex" | "codex" => {
+                    info!(
+                        "Using OpenAI Codex subscription provider: {}",
+                        cli.openai_codex_url
+                            .clone()
+                            .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string())
+                    );
+                    Box::new(OpenAICodexClient::new(
+                        cli.openai_codex_url.clone(),
+                        cli.openai_codex_auth_path.clone(),
+                        cli.openai_codex_client_version.clone(),
+                        cli.llm_model.clone(),
+                    ))
+                }
+                "anthropic" => {
+                    let url = cli
+                        .anthropic_url
+                        .unwrap_or_else(|| "https://api.z.ai/api/anthropic".to_string());
+                    let api_key = cli.anthropic_api_key.unwrap_or_else(|| {
+                        std::env::var("ANTHROPIC_AUTH_TOKEN").unwrap_or_default()
+                    });
+                    if api_key.is_empty() {
+                        anyhow::bail!("Anthropic API key not provided. Set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN env var.");
+                    }
+                    info!("Using Anthropic-compatible provider: {}", url);
+                    Box::new(AnthropicClient::new(url, api_key, cli.llm_model.clone()))
                 }
                 "ollama" => {
                     let ollama_url = std::env::var("OLLAMA_URL")
@@ -483,7 +537,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 other => {
                     anyhow::bail!(
-                        "Unknown LLM provider: {}. Use 'openai', 'minimax', 'ollama', or 'bedrock'.",
+                        "Unknown LLM provider: {}. Use 'openai', 'openai-codex', 'anthropic', 'minimax', 'ollama', or 'bedrock'.",
                         other
                     )
                 }
